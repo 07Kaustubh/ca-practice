@@ -1,0 +1,8 @@
+/var/log/ca-sweeper.log /var/log/ca-wa.log /var/log/ca-backup.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

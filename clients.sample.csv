@@ -1,0 +1,4 @@
+name,gstin,pan,email,whatsapp,optin,entity_type,gst_scheme,tan,tax_audit,roc_applicable,fee_annual,billing_cycle,tds_applicable
+Example Traders Pvt Ltd,27AAAAA0000A1Z5,AAAAA0000A,accounts@example.invalid,910000000001,1,Private Limited,Monthly,AAAA00000A,0,1,60000,Annual,1
+Example Partners LLP,29BBBBB1111B1Z5,BBBBB1111B,accounts@example2.invalid,910000000002,0,LLP,QRMP (quarterly),,0,1,36000,Quarterly,1
+Example Proprietor,07CCCCC2222C1Z5,CCCCC2222C,owner@example3.invalid,910000000003,1,Proprietorship,Composition,,1,0,18000,Annual,0

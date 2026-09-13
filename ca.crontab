@@ -1,0 +1,8 @@
+# ca-practice host jobs.
+# Dolibarr's OWN scheduler runs in the dolibarr-cron container. These three shell
+# out to `docker compose`, so they must run on the host.
+# cron's default PATH is /usr/bin:/bin only - docker is NOT found without this.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/10 * * * * cd /opt/ca && ./sweeper.sh   >> /var/log/ca-sweeper.log 2>&1
+*/10 * * * * cd /opt/ca && ./wa_fanout.py >> /var/log/ca-wa.log 2>&1
+17 2 * * *   cd /opt/ca && ./backup.sh    >> /var/log/ca-backup.log 2>&1

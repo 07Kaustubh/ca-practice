@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "playwright": "^1.63.0"
+  },
+  "scripts": {
+    "demo:record": "node demo/record-demo.mjs",
+    "ui:verify": "node lbl.mjs"
+  },
+  "private": true
+}

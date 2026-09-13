@@ -1,0 +1,11 @@
+# Dev overlay. Adds Mailpit (a local mail SINK) and publishes Dolibarr directly.
+# Mailpit lives HERE, not in the base file: `profiles: ["never"]` in an override
+# does NOT remove a base service under Compose v5.x, so "excluded in prod" was a
+# false claim. Keeping it out of the base is the only reliable exclusion.
+services:
+  mailpit:
+    image: axllent/mailpit@sha256:98b916bd3c8d61f7633a52d3ea2f58d00620cb01ca57ab59edde68c347a95365   # was axllent/mailpit:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+  dolibarr:
+    ports: ["127.0.0.1:8080:80"]

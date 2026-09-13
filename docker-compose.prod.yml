@@ -1,0 +1,22 @@
+# Overlay for a real VPS:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# - Caddy terminates TLS; nothing else publishes a port.
+# - Mailpit is absent (it lives in docker-compose.dev.yml). Use a real relay.
+services:
+  caddy:
+    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648   # was caddy:2-alpine
+    restart: unless-stopped
+    ports: ["${CA_HTTP_PORT:-80}:80", "${CA_HTTPS_PORT:-443}:443"]
+    environment:
+      CA_DOMAIN: ${CA_DOMAIN:?set CA_DOMAIN in secrets.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on: [dolibarr]
+  # Mailpit is absent because it is not in the base file at all. Dolibarr
+  # publishes no port; Caddy is the only ingress.
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

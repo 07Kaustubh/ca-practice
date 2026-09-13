@@ -1,0 +1,21 @@
+# Secrets — never commit
+secrets.env
+ca.env
+*.env.local
+
+# Client PII — 47 real PAN / GSTIN / TAN / phone numbers
+clients.csv
+
+# Backups contain every client's PAN in the clear
+backups/
+*.sql
+*.age
+
+# Build / runtime
+node_modules/
+demo/take/
+demo/frames/
+ui/*.png
+*.webm
+*.mp4
+/tmp/

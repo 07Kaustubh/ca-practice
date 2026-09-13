@@ -1,0 +1,24 @@
+# TLS terminator. Caddy auto-provisions Let's Encrypt certs for a real domain.
+# CA_DOMAIN=localhost uses `tls internal` (self-signed) so this exact config is
+# testable without DNS.
+{$CA_DOMAIN:localhost} {
+	encode gzip
+	reverse_proxy dolibarr:80
+	header {
+		Strict-Transport-Security "max-age=31536000;"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# No 'unsafe-inline' for scripts: that is what makes a stored-XSS row
+		# inert. Dolibarr needs inline STYLE, so styles stay permissive.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		X-Permitted-Cross-Domain-Policies "none"
+	}
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
