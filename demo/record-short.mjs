@@ -60,7 +60,7 @@ await s.focus('a:has-text("Compliance")', 'one tab',
 await s.unspot(); await s.hush();
 
 // 4 — take on a client, the calendar writes itself
-await go(B + '/custom/ca/client.php');
+await go(B + '/custom/ca/client.php?mainmenu=ca&leftmenu=');
 await p.fill('input[name="name"]', 'Rameshwar Agro Foods Pvt Ltd');
 await p.fill('input[name="pan"]', 'AAGCR4521M');
 await p.fill('input[name="gstin"]', '27AAGCR4521M1ZP');
@@ -87,7 +87,7 @@ await s.say(`${REMIND} email reminders are scheduled alongside it.`, 4200);
 await s.hush();
 
 // 6 — proof the return went out
-await go(B + '/custom/ca/filings.php?view=filed');
+await go(B + '/custom/ca/filings.php?view=filed&mainmenu=ca&leftmenu=');
 await s.focus('#ca-filed', 'filed, with the ARN',
   'What went out, when, by whom, and under which acknowledgement number.', 5600);
 await s.unspot(); await s.hush();

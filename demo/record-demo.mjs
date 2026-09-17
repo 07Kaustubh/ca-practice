@@ -78,7 +78,7 @@ await s.unspot(); await s.hush();
 await s.step(5,TOTAL);
 await s.chapter('STEP 5 OF 12','Taking On A Client',
   'No spreadsheet to send anyone. He types the profile and the statutory calendar derives itself.',4600);
-await go(B+'/custom/ca/client.php');
+await go(B+'/custom/ca/client.php?mainmenu=ca&leftmenu=');
 await p.fill('input[name="name"]','Rameshwar Agro Foods Pvt Ltd');
 await p.fill('input[name="pan"]','AAGCR4521M');
 await p.fill('input[name="gstin"]','27AAGCR4521M1ZP');
@@ -134,7 +134,7 @@ await s.hush();
 await s.step(10,TOTAL);
 await s.chapter('STEP 10 OF 12','Proof It Went Out',
   'Documents coming in is half a system. The acknowledgement number is the other half.',5000);
-await go(B+'/custom/ca/filings.php?view=ready');
+await go(B+'/custom/ca/filings.php?view=ready&mainmenu=ca&leftmenu=');
 await s.focus('#ca-ready','ready to file',
   'Documents all back. These are waiting on him now, not on the client.',6200);
 await s.unspot();
@@ -143,7 +143,7 @@ await s.say('A number in the wrong shape for that return is refused - an ack nob
 // Both tables on one page leave the filed list permanently under the fold, and
 // the page is too short to scroll it up. The screen's own Filed view is where a
 // CA would look anyway.
-await go(B+'/custom/ca/filings.php?view=filed');
+await go(B+'/custom/ca/filings.php?view=filed&mainmenu=ca&leftmenu=');
 await s.focus('#ca-filed','filed, with the ARN',
   'What went out, when, by whom, and under which acknowledgement.',6400);
 await s.unspot();
