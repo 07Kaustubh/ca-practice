@@ -34,7 +34,7 @@ export function makeStage(p){
         #__ripple{position:fixed;width:14px;height:14px;border-radius:50%;border:3px solid #f43f5e;opacity:0}
         #__ripple.go{animation:rp .65s ease-out}
         @keyframes rp{0%{transform:scale(.4);opacity:1}100%{transform:scale(5);opacity:0}}
-        #__cap{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(9,12,20,.0),rgba(9,12,20,.97) 26%);
+        #__cap{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(9,12,20,.0),rgba(9,12,20,1) 30%);
           padding:52px 60px 30px;opacity:0;transition:opacity .18s}
         #__captxt{display:inline-block;color:#fff;font:700 30px/1.35 system-ui,-apple-system,sans-serif;
           letter-spacing:-.2px;text-shadow:0 2px 12px rgba(0,0,0,.9);max-width:1100px}
@@ -62,6 +62,22 @@ export function makeStage(p){
   const wait = ms => p.waitForTimeout(ms);
 
   async function box(sel){
+    // Bring it into view FIRST. This only ever measured, so focusing an element
+    // below the fold drew the ring and its badge at the viewport edge - the
+    // "filed, with the ARN" callout pointed at a table that was off-screen and
+    // collided with the caption bar, captioning something nobody could see.
+    await p.evaluate((s)=>{
+      const el=document.querySelector(s); if(!el) return;
+      const r=el.getBoundingClientRect();
+      // Align the TOP just under the nav rather than centring. block:'center' on a
+      // tall table puts its middle at mid-viewport, which left only two rows above
+      // the caption bar - the rest of the evidence was still cut off.
+      if(r.top<90||r.bottom>window.innerHeight-150){
+        const abs=window.scrollY+r.top;
+        window.scrollTo({top:Math.max(0,abs-110),behavior:'instant'});
+      }
+    }, sel).catch(()=>{});
+    await p.waitForTimeout(500);   // let the scroll settle before measuring
     return p.evaluate((s)=>{
       let el=document.querySelector(s); if(!el) return null;
       let r=el.getBoundingClientRect();

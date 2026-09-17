@@ -54,6 +54,35 @@ echo "[4c] practice finances (invoices, bank, expenses, TDS 194J, service catalo
 docker compose cp finance_setup.php dolibarr:/tmp/finance_setup.php >/dev/null
 docker compose exec -T dolibarr php /tmp/finance_setup.php
 
+# Installed INTO the app, not copied to /tmp and deleted: these are the libraries
+# the CLI shares with the screens, plus the screens themselves. They must land
+# before the calendar runs - compliance_calendar.php now requires
+# ca_calendar_lib.php from here rather than carrying its own copy of the rules.
+echo "[4c2] CA libraries + the screens the practice is run from"
+docker compose exec -T dolibarr sh -c 'mkdir -p /var/www/html/custom/ca'
+n=0
+while IFS=: read -r src dst; do
+  [ -n "${src:-}" ] || continue
+  [ -f "$src" ] || { echo "FATAL: $src is missing from the working directory"; exit 1; }
+  # </dev/null: the pair list arrives on this loop's stdin and `docker compose cp`
+  # reads stdin - without it the loop swallows its own input after one iteration.
+  docker compose cp "$src" "dolibarr:/var/www/html/custom/ca/$dst" >/dev/null </dev/null
+  n=$((n+1))
+done <<'PAIRS'
+ca_filing_lib.php:ca_filing_lib.php
+ca_calendar_lib.php:ca_calendar_lib.php
+filings_screen.php:filings.php
+client_screen.php:client.php
+rates_screen.php:rates.php
+adjustments_screen.php:adjustments.php
+ca_privacy_lib.php:ca_privacy_lib.php
+privacy_screen.php:privacy.php
+PAIRS
+docker compose exec -T dolibarr sh -c 'chown -R www-data:www-data /var/www/html/custom/ca 2>/dev/null; chmod 0644 /var/www/html/custom/ca/*.php'
+inst=$(docker compose exec -T dolibarr sh -c 'ls /var/www/html/custom/ca/*.php 2>/dev/null | wc -l' | tr -d ' \r')
+[ "${inst:-0}" = "$n" ] || { echo "      FATAL: installed $inst of $n CA web file(s)"; exit 1; }
+echo "      $n file(s) under /custom/ca"
+
 if [ "${CA_GENERATE_CALENDAR:-1}" = "1" ]; then
   echo "[4d] statutory compliance calendar"
   docker compose cp compliance_calendar.php dolibarr:/tmp/compliance_calendar.php >/dev/null
@@ -66,6 +95,14 @@ if [ "${CA_RAISE_FEES:-0}" = "1" ]; then
   docker compose exec -T dolibarr php /tmp/raise_fees.php --commit
 fi
 
+echo "[4f] document requests (what the client owes him)"
+docker compose cp doc_requests.php dolibarr:/tmp/doc_requests.php >/dev/null
+docker compose exec -T dolibarr php /tmp/doc_requests.php
+
+echo "[4g] filing ledger + late-fee exposure"
+docker compose cp filings.php dolibarr:/tmp/filings.php >/dev/null
+docker compose exec -T -e CA_GOLIVE dolibarr php /tmp/filings.php
+
 case "${COMPOSE_FILE:-}" in
   *prod*) echo "[5/7] smoke test skipped (prod profile has no Mailpit - use ./healthcheck.sh)";;
   *)      echo "[5/7] end-to-end smoke test"; ./smoke.sh || { echo "FATAL: smoke test failed"; exit 1; };;
@@ -74,10 +111,11 @@ esac
 # clients.csv alone holds 47 real PAN/GSTIN/TAN/phone records; any path-traversal
 # or file-read bug in Dolibarr would read it straight off disk.
 echo "[5b] wiping copied artefacts from the container"
-docker compose exec -T dolibarr sh -c \
-  'rm -f /tmp/clients.csv /tmp/setup_all.php /tmp/extrafields.php /tmp/import_clients.php \
-         /tmp/finance_setup.php /tmp/compliance_calendar.php /tmp/raise_fees.php \
-         /tmp/smoke.php /tmp/cc.php /tmp/fs.php /tmp/rf.php /tmp/users_setup.php /tmp/digest.eml 2>/dev/null; true'
+# Wipe by GLOB, not by a hardcoded list. The list had to be edited every time a
+# script was added and silently fell behind - fl.php, fr.php and dfc.php were all
+# missing from it. The assertion below already demands ZERO .php/.csv in /tmp, so
+# the wipe should simply match the assertion instead of enumerating filenames.
+docker compose exec -T dolibarr sh -c 'rm -f /tmp/*.php /tmp/*.csv /tmp/*.eml 2>/dev/null; true'
 left=$(docker compose exec -T dolibarr sh -c 'ls /tmp/*.csv /tmp/*.php 2>/dev/null | wc -l' | tr -d " \r")
 [ "${left:-0}" = "0" ] && echo "      /tmp clean" || { echo "      FATAL: $left artefact(s) left in container /tmp"; exit 1; }
 rm -f /tmp/digest.eml /tmp/wa_digest.eml 2>/dev/null

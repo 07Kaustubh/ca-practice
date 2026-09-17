@@ -2,220 +2,177 @@ import { chromium } from 'playwright';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import { makeStage } from './lib.mjs';
-
-const pw = fs.readFileSync(new URL('../secrets.env',import.meta.url))
-             .toString().match(/DOLI_ADMIN_PASSWORD=(.+)/)[1].trim();
-const B='http://127.0.0.1:8080', M='http://127.0.0.1:8025';
-const TOTAL=13;
-
+const pw = fs.readFileSync(new URL('../secrets.env',import.meta.url)).toString()
+             .match(/DOLI_ADMIN_PASSWORD=(.+)/)[1].trim();
+const B='http://127.0.0.1:8080', M='http://127.0.0.1:8025', TOTAL=12;
 const browser=await chromium.launch();
-const ctx=await browser.newContext({viewport:{width:1440,height:1000},
-  recordVideo:{dir:'demo/take/',size:{width:1440,height:1000}}});
-const p=await ctx.newPage();
-const s=makeStage(p);
+const ctx=await browser.newContext({viewport:{width:1440,height:960},
+  recordVideo:{dir:'demo/take/',size:{width:1440,height:960}}});
+const p=await ctx.newPage(); const s=makeStage(p);
 const wait=ms=>p.waitForTimeout(ms);
-
-async function go(url){ await p.goto(url,{waitUntil:'domcontentloaded'}); await wait(1600); await s.ready(); }
-async function click(sel,label,hold=900){
-  await s.cursorTo(sel);
-  if(label) await s.spotlight(sel,label), await wait(hold);
-  await s.ripple(sel);
-  const el=await p.$(sel);
-  if(el){ await el.scrollIntoViewIfNeeded().catch(()=>{}); await el.click({force:true}).catch(()=>{}); }
-  await s.unspot(); await wait(600);
+async function go(u){ await p.goto(u,{waitUntil:'domcontentloaded'}); await wait(1500); await s.ready(); }
+async function pre(text,title){
+  // The chapter card fades over 0.5s and its pink eyebrow ("STEP n OF 9") was
+  // bleeding through as a second, larger badge overlapping the data. Kill the
+  // card and the caption before replacing the document.
+  await p.evaluate(()=>{ const c=document.getElementById('__card');
+    if(c){ c.style.transition='none'; c.style.opacity='0'; }
+    const cap=document.getElementById('__cap'); if(cap) cap.style.opacity='0';
+  }).catch(()=>{});
+  await p.waitForTimeout(700);                 // full-screen monospace artefact
+  await p.setContent(`<body style="margin:0;background:#0b1020;color:#d7dee8;
+    font:17px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;padding:38px 60px">
+    <div style="color:#f43f5e;font:800 17px system-ui;letter-spacing:3.5px;margin-bottom:20px">${title}</div>
+    <pre style="white-space:pre;margin:0;font-variant-ligatures:none">${text.replace(/[<&]/g,c=>({'<':'&lt;','&':'&amp;'}[c]))}</pre></body>`);
+  await s.ready();
+  // These pages are pure text artefacts - there is nothing to point at, and the
+  // re-injected pointer parked itself mid-paragraph, sitting on top of a word.
+  await p.evaluate(()=>{ for(const id of ['__cur','__ripple']){
+    const e=document.getElementById(id); if(e) e.style.display='none'; } }).catch(()=>{});
 }
-async function typeIn(sel,text,d=62){
-  await s.cursorTo(sel); await s.ripple(sel);
-  await p.click(sel,{force:true}).catch(()=>{});
-  await p.type(sel,text,{delay:d}).catch(()=>{});
-  await wait(700);
-}
 
-// ───────── 0 · title
 await go(B+'/');
-await s.chapter('CHARTERED ACCOUNTANT · INDIA','Practice Management',
-  'Dolibarr — open source, self-hosted. Client register, filing deadlines, automatic reminders.',5200);
+await s.chapter('ONE CLIENT. ONE SLIP.','Rs 10,500',
+  'GSTR-3B thirty days late is Rs 1,500. The TDS return is Rs 6,000. AOC-4 is Rs 100 a day with no cap.',6000);
+await s.chapter('AND HE HAS FORTY-SEVEN OF THEM','1,261 dates a year',
+  'He already knows the dates. What loses him a filing is the client who has not sent the documents.',5600);
 
-// ───────── 1 · login
 await s.step(1,TOTAL);
-await s.say('Log in. On the VPS this is your own domain over HTTPS.',4200);
-await typeIn('input[name="username"]','admin');
-await typeIn('input[name="password"]',pw,40);
-await s.hush();
+await s.say('Log in.',2600);
+await p.fill('input[name="username"]','admin'); await p.fill('input[name="password"]',pw);
 await Promise.all([p.waitForNavigation({timeout:30000}).catch(()=>{}),p.click('input[type="submit"]')]);
-await wait(3000); await s.ready();
+await wait(2500); await s.ready(); await s.hush();
 
-// ───────── 2 · dashboard
+// 2 - the dashboard he lands on
 await s.step(2,TOTAL);
+await s.chapter('STEP 2 OF 12','The Screen He Opens Every Morning',
+  'Not a report he has to run. The first thing on the screen when he logs in.',4400);
 await go(B+'/index.php?mainmenu=home');
-await s.chapter('STEP 2 OF 10','The Dashboard','What the CA sees every morning.',3600);
-await s.step(2,TOTAL);
-await s.focus('.tmenu','the whole menu','Only four menu items. Dolibarr ships ~140 modules — the rest stay off.',6000);
+await s.focus('.box-flex-container, .fichecenter','what is coming up',
+  'Deadlines due, fees unpaid, and the bank - without opening anything.',6000);
 await s.unspot();
-await s.focus('div.box-flex-item','his next deadlines','Upcoming filing deadlines, per client. This is the point of the tool.',6000);
+await s.focus('a:has-text("Compliance")','one tab',
+  'Everything a filing needs sits behind one tab. No URLs, no training.',5200);
 await s.unspot();
-await s.focus('table','scheduled jobs','A scheduled-jobs panel. If "jobs in error" is not zero, reminders are broken.',6000);
-await s.unspot(); await s.hush();
+await s.say('Zero late. The returns filed before this system existed are not counted against him.',6000);
+await s.hush();
 
-// ───────── 3 · client register
+// 2 — the morning email IS the product
 await s.step(3,TOTAL);
+await pre(fs.readFileSync('demo/morning-email.txt','utf8').slice(0,1600),'08:00 — DAILY DIGEST');
+await s.chapter('STEP 3 OF 12','His Morning, In 30 Seconds','One email. Not a dashboard with a thousand rows.',4200);
+await s.ready();
+await s.say('This week, ranked by urgency. Two exclamation marks means two days left.',6000);
+await s.say('"Not yet chased" is the column that matters — nobody has chased that client yet.',6200);
+await s.say('And a data-quality block: a stale profile makes the calendar confidently wrong.',6400);
+await s.hush();
+
+// 3 — the register
+await s.step(4,TOTAL);
 await go(B+'/societe/list.php');
-await s.chapter('STEP 3 OF 10','The Client Register','Imported from CSV in one command.',3400);
-await s.step(3,TOTAL);
-await s.focus('table','53 clients','Every client, searchable and sortable. GSTIN and PAN come in from the CSV.',6200);
+await s.focus('table','47 clients','Every client, with the profile that drives everything else.',5600);
 await s.unspot(); await s.hush();
 
-// ───────── 4 · add a client
-await s.step(4,TOTAL);
-await go(B+'/societe/card.php?action=create');
-await s.chapter('STEP 4 OF 10','Adding a Client','Three things here are easy to get wrong.',3600);
-await s.step(4,TOTAL);
-await s.say('The heading says "New Third Party" — that is Dolibarr\'s own wording, not a bug.',5000);
-await typeIn('input[name="name"]','Sharma Textiles Pvt Ltd',55);
-await typeIn('input[name="email"]','accounts@sharmatextiles.in',38);
-await s.say('Now the first trap.',2600);
-await click('input[name="customer"]','TICK THIS — or the client never appears in the list',3600);
-await s.say('Miss that box and the record saves, but the client is invisible in the register.',5200);
-await s.say('Second trap: GSTIN, PAN and WhatsApp are hidden behind "More...".',5000);
-await p.evaluate(()=>{const a=[...document.querySelectorAll('a')].find(x=>/^More\.\.\./.test(x.innerText.trim())); if(a) a.click();});
-await wait(1800); await s.ready();
-await typeIn('[name="options_gstin"]','27AAAAA0000A1Z5',48);
-await typeIn('[name="options_pan"]','AAAAA0000A',48);
-await typeIn('[name="options_whatsapp_number"]','919820098200',44);
-await s.say('Third trap — and this one silently disables WhatsApp for the client.',5000);
-await click('[name="options_whatsapp_optin"]','Meta requires documented consent',3800);
-await s.say('No opt-in ticked, no WhatsApp sent. The script refuses, by design.',5000);
-await s.hush();
-const cbtn=await p.$('input[type="submit"][name="add"], input[type="submit"]');
-if(cbtn){ await cbtn.scrollIntoViewIfNeeded().catch(()=>{}); await s.cursorTo('input[type="submit"]');
-  await s.ripple('input[type="submit"]');
-  await Promise.all([p.waitForNavigation({timeout:30000}).catch(()=>{}),cbtn.click({force:true})]); }
-await wait(3000); await s.ready();
-await s.focus('td:has-text("27AAAAA0000A1Z5")','GSTIN, saved','Saved. GSTIN and PAN now show directly on the record — no expanding needed.',6400)
-  .catch(async()=>{ await s.say('Saved. GSTIN and PAN now show directly on the record.',5200); });
-await s.unspot(); await s.hush();
-
-// ───────── 5 · deadline
+// 4 — profile drives the calendar
+// 4 - he takes on a client himself, and the calendar appears
 await s.step(5,TOTAL);
-await go(B+'/comm/action/card.php?action=create');
-await s.chapter('STEP 5 OF 10','A Filing Deadline','With the reminder that actually matters.',3600);
-await s.step(5,TOTAL);
-await typeIn('input[name="label"]','GSTR-3B filing due - Sharma Textiles',42);
-const d=new Date(Date.now()+7*864e5);
-await p.fill('input[name="ap"]',`${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`).catch(()=>{});
-await s.focus('input[name="ap"]','mandatory','Title and due date. The date is mandatory — a blank one is rejected.',5600);
-await s.unspot();
-await p.selectOption('select[name="socid"]',{label:/Sharma Textiles/}).catch(async()=>{
-  await p.evaluate(()=>{const sel=document.querySelector('select[name="socid"]');
-    const o=[...sel.options].find(x=>/Sharma Textiles/.test(x.textContent));
-    if(o){sel.value=o.value; sel.dispatchEvent(new Event('change',{bubbles:true}));}});});
-await wait(1200); await s.ready();
-await s.focus('select[name="socid"]','links it to the client','Link it to the client. That is what puts the deadline on their record.',5600);
-await s.unspot();
-await click('input[name="addreminder"]','turn the reminder on',3200);
-await wait(1200);
-await p.fill('input[name="offsetvalue"]','7').catch(()=>{});
-await p.locator('select[name="offsetunittype_duration"]').scrollIntoViewIfNeeded().catch(()=>{});
-await wait(800); await s.ready();
-await s.focus('input[name="offsetvalue"]','seven...','Remind seven before the deadline. Seven what?',4600);
-await s.unspot();
-await s.focus('select[name="offsetunittype_duration"]','DEFAULTS TO MINUTES',
-  'It defaults to MINUTES. Left alone he is warned 7 minutes before a GST deadline.',7000);
-await s.say('The single easiest mistake to make in this entire application.',5400);
-await s.unspot();
-await p.selectOption('select[name="offsetunittype_duration"]','d').catch(()=>{});
-await s.focus('select[name="offsetunittype_duration"]','now: DAYS',
-  'Change it to Days. Seven days before — which is what he meant.',6000);
-await s.unspot();
-const st=await p.inputValue('select[name="offsetunittype_duration"]').catch(()=>'?');
-const sq=await p.inputValue('input[name="offsetvalue"]').catch(()=>'?');
-console.log(`    ASSERT reminder = ${sq} / ${st}  (want 7 / d)`);
+await s.chapter('STEP 5 OF 12','Taking On A Client',
+  'No spreadsheet to send anyone. He types the profile and the statutory calendar derives itself.',4600);
+await go(B+'/custom/ca/client.php');
+await p.fill('input[name="name"]','Rameshwar Agro Foods Pvt Ltd');
+await p.fill('input[name="pan"]','AAGCR4521M');
+await p.fill('input[name="gstin"]','27AAGCR4521M1ZP');
+await p.fill('input[name="tan"]','MUMR21458C');
+await p.selectOption('select[name="entity_type"]','Private Limited').catch(()=>{});
+await p.selectOption('select[name="gst_scheme"]','Monthly').catch(()=>{});
+await p.selectOption('select[name="roc_applicable"]','1').catch(()=>{});
+await s.say('GST scheme, TAN, entity type. That is the whole input.',5200);
+await Promise.all([p.waitForNavigation({timeout:30000}).catch(()=>{}),
+                   p.click('input[type="submit"][value*="Save"], input.button[type="submit"]').catch(()=>{})]);
+await wait(2500); await s.ready();
+await s.say('Every statutory deadline that profile implies - derived, dated, and on his calendar.',6400);
 await s.hush();
-const abtn=await p.$('input[type="submit"][name="add"], input[type="submit"]');
-if(abtn){ await abtn.scrollIntoViewIfNeeded().catch(()=>{});
-  await Promise.all([p.waitForNavigation({timeout:30000}).catch(()=>{}),abtn.click({force:true})]); }
-await wait(3000); await s.ready();
 
-// ───────── 5b · the calendar is GENERATED
 await s.step(6,TOTAL);
-await s.chapter('STEP 6 OF 13','The Calendar Generates Itself',
-  'Statutory dates are fixed by law and derivable from each client profile.',4200);
-await s.say('One GST-monthly client with a TAN owes about 44 filings a year.',5200);
-await s.say('Across 47 clients that is over a thousand deadlines. Nobody types those.',5600);
+await s.chapter('STEP 6 OF 12','The Profile Is The Engine','GST scheme, TAN, entity type, audit applicability.',4200);
 await go(B+'/societe/card.php?socid=1');
-await s.focus('td:has-text("Monthly"), td:has-text("QRMP")','GST scheme',
-  'So the profile drives it: GST scheme, TAN, entity type, audit applicability.',6200)
-  .catch(async()=>{ await s.say('The profile drives it: GST scheme, TAN, entity type, audit.',5200); });
-await s.unspot();
-await go(B+'/comm/action/list.php');
+// The left panel is Dolibarr's generic Prof-ID block and is blank for a CA.
+// The CA fields live in the extrafields table on the right - point there.
+await s.focus('td:has-text("GST filing scheme"), tr:has-text("GST filing scheme")','GST scheme · TAN · entity type',
+  'A GST-monthly client with a TAN owes close to fifty filings a year. Nobody types those.',6400);
+await s.unspot(); await s.hush();
+
+// 5 — the calendar, shown on the client record where it reads clearly
 await s.step(7,TOTAL);
-await s.focus('table','1,111 deadlines, generated',
-  'GSTR-1 on the 11th, GSTR-3B on the 20th, TDS on the 7th, advance tax, ITR, ROC.',6400);
+await go(B+'/societe/agenda.php?socid=1');
+await s.focus('table','this client alone',
+  'Every statutory filing for one client, derived from that profile.',6200);
 await s.unspot();
-await s.say('Generated once each April. Re-running it never duplicates anything.',5400);
+await s.say('Across 47 clients that is about 1,200 filings a year. Nobody types those.',5800);
 await s.hush();
 
-// ───────── 6 · on the client record
-await s.chapter('STEP 6 OF 10','On the Client Record','Every deadline, in one place.',3400);
-await s.step(6,TOTAL);
-await s.focus('a:has-text("Deadlines")','this tab','The deadline now sits on Sharma Textiles, under the Deadlines tab.',6200)
-  .catch(async()=>{ await s.say('The deadline now sits on the client record.',5000); });
-await s.unspot(); await s.hush();
+// 6 — documents: the actual job
+await s.step(8,TOTAL);
+await s.chapter('STEP 8 OF 12','What He Is Actually Waiting For',
+  'The deadline is not the problem. The missing purchase register is.',5000);
+const docs=execSync(`docker compose exec -T -e MYSQL_PWD="${process.env.DB_PASSWORD}" db mariadb -udolibarr dolibarr -e "SELECT s.nom AS client, d.filing, d.doc_type, d.due FROM ca_docrequest d JOIN llx_societe s ON s.rowid=d.fk_soc WHERE d.status='pending' ORDER BY d.due LIMIT 14;" 2>/dev/null`,{encoding:'utf8'});
+await pre(docs,'OPEN DOCUMENT REQUESTS');
+await s.say('Per client, per filing, exactly which document is outstanding.',6000);
+await s.hush();
 
-// ───────── 7 · all deadlines
-await s.step(7,TOTAL);
-await go(B+'/comm/action/list.php');
-await s.chapter('STEP 7 OF 10','Every Client, Every Deadline','The practice-wide view.',3400);
-await s.step(7,TOTAL);
-await s.focus('table','every client, every deadline','Filterable by date, client or type — his compliance calendar.',6200);
-await s.unspot(); await s.hush();
+// 7 — the chase
+await s.step(9,TOTAL);
+await s.chapter('STEP 9 OF 12','Chasing The Client, Not The CA',
+  'WhatsApp is the one channel Indian clients actually read.',4600);
+await pre(fs.readFileSync('demo/chase-preview.txt','utf8'),'WHATSAPP CHASE — DRY RUN');
+await s.say('Escalating tone: polite at ten days, firm at five, urgent at two.',6000);
+await s.say('One message per client per day, however many documents are outstanding.',5800);
+await s.say('No opt-in recorded, no message. Meta requires it and the code enforces it.',6200);
+await s.hush();
 
-// ───────── 7b · the practice's own money
+// 8 - the loop closes: proof the return actually went OUT
 await s.step(10,TOTAL);
-await s.chapter('STEP 10 OF 13','His Own Fees',
-  'The half of the practice that funds the other half.',4200);
-await go(B+'/compta/facture/list.php');
-await s.focus('table','47 fee invoices',
-  'Retainers billed pro-rata on each client cycle, at 18% GST.',6200);
+await s.chapter('STEP 10 OF 12','Proof It Went Out',
+  'Documents coming in is half a system. The acknowledgement number is the other half.',5000);
+await go(B+'/custom/ca/filings.php?view=ready');
+await s.focus('#ca-ready','ready to file',
+  'Documents all back. These are waiting on him now, not on the client.',6200);
 await s.unspot();
-await s.say('Rs 926,500 in fees, Rs 166,770 GST, Rs 1,093,270 billed this period.',6000);
-await s.step(11,TOTAL);
-await s.say('And the part every generic CRM misses: TDS under section 194J.',5600);
-await s.say('Clients withhold 10% of his fees. Untracked, he overpays his own tax.',6000);
-await s.say('Rs 45,525 receivable here, across 23 clients, all awaiting Form 16A.',6000);
+await s.say('He files on the portal, then records the acknowledgement here.',5400);
+await s.say('A number in the wrong shape for that return is refused - an ack nobody can check is not proof.',6600);
+// Both tables on one page leave the filed list permanently under the fold, and
+// the page is too short to scroll it up. The screen's own Filed view is where a
+// CA would look anyway.
+await go(B+'/custom/ca/filings.php?view=filed');
+await s.focus('#ca-filed','filed, with the ARN',
+  'What went out, when, by whom, and under which acknowledgement.',6400);
+await s.unspot();
+await s.say('That is the answer to "did we file it?" - and to a notice, two years later.',6000);
 await s.hush();
 
-// ───────── 8 · the cron
-await s.chapter('STEP 8 OF 10','The Reminder Fires','No one has to remember to press anything.',3600);
-await s.step(12,TOTAL);
-await s.say('A container runs the reminder job every 5 minutes. Triggering it now.',5000);
-try{
-  execSync(`docker compose exec -T db mariadb -udolibarr -p"${process.env.DB_PASSWORD}" dolibarr -e "UPDATE llx_actioncomm_reminder SET dateremind=DATE_SUB(NOW(),INTERVAL 5 MINUTE), status=0 WHERE status=0; UPDATE llx_cronjob SET datenextrun=NULL,datelastrun=NULL WHERE rowid=1;"`,{stdio:'ignore'});
-  execSync(`docker compose exec -T dolibarr php /var/www/scripts/cron/cron_run_jobs.php "${process.env.CA_CRON_KEY}" admin`,{stdio:'ignore'});
-}catch(e){}
-await wait(2200);
-
-// ───────── 9 · the email
-await s.step(13,TOTAL);
-await go(M+'/');
-await s.say('The mail server. In development this catches everything so you can verify.',5200);
-await s.focus('tbody tr, .message','the reminder just sent','There it is — the reminder for the deadline created a minute ago.',6000)
-  .catch(async()=>{ await s.say('There it is — the reminder just sent.',5000); });
+// 8 — his own money
+await s.step(11,TOTAL);
+await go(B+'/compta/facture/list.php');
+await s.focus('table','his own fees','Retainers billed pro-rata at 18% GST.',5600);
 await s.unspot();
-const first=await p.$('.message, [class*="message"], tbody tr');
-if(first){ await first.click({force:true}).catch(()=>{}); }
-await wait(2800); await s.ready();
-await s.say('Real email. Real content. Not a simulation.',4600);
-await wait(2200); await s.hush();
+await s.say('And TDS under section 194J — clients withhold 10% of his fees.',6000);
+await s.say('Untracked, he overpays his own tax. No generic CRM models this.',5800);
+// the other half of "basic funds management" - his own bank, not the clients'
+await go(B+'/compta/bank/list.php');
+await s.focus('table','his own bank',
+  'His practice account, reconciliation and books - the money side, in the same place.',6000);
+await s.unspot(); await s.hush();
+await s.hush();
 
-// ───────── 10 · close
-await s.chapter('WHAT IS DONE','Email reminders work end to end',
-  '47 clients · 1,111 statutory deadlines · fee invoicing · TDS 194J · unattended cron · delivered mail · backup and restore · TLS',5200);
-await s.chapter('WHAT NEEDS THE CA','Three things only he can provide',
-  'A Meta Business account for WhatsApp · an SMTP relay on his domain · the VPS itself',5600);
-await s.chapter('','~/ca-practice','USAGE.md — how to run it.   HANDOVER.md — why, and every gotcha.',5000);
-
-await ctx.close();
-const vp=await p.video().path().catch(()=>null);
-await browser.close();
-console.log('  raw:',vp);
+// 9 — proof
+await s.step(12,TOTAL);
+await go(M+'/');
+await s.say('Every reminder and digest is delivered, not simulated.',5200);
+await s.hush();
+await s.chapter('WHAT IT DOES','Chases clients for documents',
+  'Client register · derived statutory calendar · document collection · WhatsApp chase · filing record with acknowledgement · fee invoicing with TDS 194J · run entirely from the browser',5600);
+await s.chapter('WHAT HAPPENS NEXT','One evening to set up',
+  'Your client list goes in once. The calendar derives itself. Reminders start that night.',5600);
+await s.chapter('WHAT IT DOES NOT','File returns, or keep your clients books',
+  'The GST portal files. Tally keeps their ledgers. This makes sure you are never waiting on a document at 5pm on the 19th.',6000);
+await ctx.close(); await browser.close();

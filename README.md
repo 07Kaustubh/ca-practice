@@ -8,7 +8,7 @@ Docker and Caddy.
 ## Why
 
 Indian statutory deadlines are fixed by law and **derivable from each client's
-profile**. One GST-monthly client with a TAN owes ~44 filings a year; 47 clients
+profile**. One GST-monthly client with a TAN owes ~50 filings a year; 47 clients
 is over a thousand deadlines. Nobody types those, which is why generic CRMs get
 abandoned. This derives them:
 
@@ -40,26 +40,45 @@ Design decisions, security posture and every trap found the hard way:
 
 ## Verification
 
-`./regression.sh` wipes to empty volumes and runs 17 gates — deploy, CSV import
+`./regression.sh` wipes to empty volumes and runs 34 gates — deploy, CSV import
 with PAN/GSTIN validation, calendar generation, invoicing with 194J assertions,
-per-user attribution, audit trail, backup→destroy→**restore**, WhatsApp opt-in
+the filing lifecycle end to end (documents received → ready → filed with a valid
+acknowledgement, junk and back-dated acknowledgements refused), statutory dates
+asserted against the year the statute means, app/db clock agreement, per-user
+attribution, audit trail, backup→destroy→**restore**, WhatsApp opt-in
 enforcement, every cron job under `env -i`, and the production profile through
 Caddy with TLS.
 
-Nothing here is claimed without a gate that fails when it stops being true.
+Nothing here is claimed without a gate that fails when it stops being true — and
+a gate that cannot fail is treated as a defect, not as a pass.
 
 ## Scope
 
-**Does:** client register · compliance calendar · reminders · his practice's
-invoicing, bank, expenses and books.
+**Does:** client register · compliance calendar · reminders · document collection
+· a filing ledger that records *that* a return went out, when, and under which
+acknowledgement number · his practice's invoicing, bank, expenses and books.
 
-**Deliberately does not:** file returns (that is the GST portal / Winman), or
-keep *clients'* ledgers (Dolibarr is one company's books — that is Tally's job).
+**Run from the browser, no shell:** add or edit a client and the statutory
+calendar is generated on save (`/custom/ca/client.php`) · record a filing with
+its acknowledgement (`filings.php`) · edit the late-fee rates when a statute
+changes (`rates.php`) · record a gazetted holiday or a government extension,
+which moves that due date for every client at once (`adjustments.php`).
+The calendar also regenerates nightly, so nothing waits on a deploy.
+
+Server configuration — SMTP, WhatsApp credentials, backup keys — stays in
+`ca.env` / `secrets.env` on the host, deliberately: secrets do not belong in a
+web form.
+
+**Deliberately does not:** *file* returns — that is the GST portal / Winman. It
+records the filing and its ARN/SRN/acknowledgement afterwards, which is what lets
+it answer "what is still outstanding?" and evidence timely filing if challenged.
+It also does not keep *clients'* ledgers (Dolibarr is one company's books — that
+is Tally's job).
 
 ## Not done
 
 Real Meta WhatsApp delivery, an SMTP relay with SPF/DKIM/DMARC, and the VPS need
-your own accounts. DPDP §8(7) retention/erasure is not implemented. See
+your own accounts. See
 HANDOVER.md, which lists these plainly rather than burying them.
 
 ## Licence

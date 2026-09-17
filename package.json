@@ -4,7 +4,13 @@
   },
   "scripts": {
     "demo:record": "node demo/record-demo.mjs",
-    "ui:verify": "node lbl.mjs"
+    "ui:verify": "node lbl.mjs",
+    "demo:short": "node demo/record-short.mjs",
+    "qa:walkthrough": "node ca_walkthrough.mjs",
+    "qa:a11y": "node a11y_audit.mjs"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "axe-core": "^4.13.0"
+  }
 }

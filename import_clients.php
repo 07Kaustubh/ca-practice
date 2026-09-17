@@ -13,7 +13,8 @@ $fh=fopen($path,'r');
 $hdr=fgetcsv($fh);
 if (!$hdr) { fwrite(STDERR,"  FAIL: empty CSV\n"); exit(1); }
 $required=array('name','gstin','pan','email','whatsapp','optin',
-                'entity_type','gst_scheme','tan','tax_audit','roc_applicable','fee_annual','billing_cycle');
+                'entity_type','gst_scheme','tan','tax_audit','roc_applicable','fee_annual','billing_cycle',
+                'turnover_annual');
 $optional=array('tds_applicable');
 $missing=array_diff($required,$hdr);
 if ($missing) { fwrite(STDERR,"  FAIL: CSV missing columns: ".implode(',',$missing)."\n"); exit(1); }
@@ -57,6 +58,8 @@ while(($r=fgetcsv($fh))!==false){
   $s->array_options['options_tax_audit']=$row['tax_audit'];
   $s->array_options['options_roc_applicable']=$row['roc_applicable'];
   $s->array_options['options_fee_annual']=$row['fee_annual'];
+  // decides whether GSTR-9 applies at all (exempt up to Rs 2 crore)
+  $s->array_options['options_turnover_annual']=isset($row['turnover_annual'])?$row['turnover_annual']:0;
   $s->array_options['options_billing_cycle']=$row['billing_cycle'];
   $s->array_options['options_tds_applicable']=isset($row['tds_applicable'])?$row['tds_applicable']:0;
   $id=$s->create($u);

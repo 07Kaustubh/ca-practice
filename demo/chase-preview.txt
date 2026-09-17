@@ -1,0 +1,1 @@
+FATAL: db error: failed to connect to the docker API at unix:///Users/kaustubhbhargava/.docker/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /Users/kaustubhbhargava/.docker/run/

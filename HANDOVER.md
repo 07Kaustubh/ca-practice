@@ -227,9 +227,216 @@ with an undefined-function fatal. Also: generated passwords must satisfy the
 project's own 12-char + uppercase policy — `bin2hex()` is lowercase-only and
 fails it.
 
+## Gotcha 12 — three cron jobs failed every night, silently
+`ca.crontab` called `docker compose` inline for the digest, the document refresh
+and the filing ledger. cron supplies no environment, and **`docker compose`
+cannot even parse `docker-compose.yml` without `DB_PASSWORD`** — so all three
+died instantly with `required variable DB_PASSWORD is missing`, into logs nobody
+reads. The digest also never forwarded `CA_EMAIL`/`CA_SMTP_HOST` into the
+container, so even a working copy would have posted to `mailpit:1025` with no
+recipient. They now go through `ca_job.sh`, which sources the env first.
+
+The reason this survived: the cron-env gate discovered jobs with
+`grep -oE '\./[a-z_]+\.(sh|py)'`, which matches `./sweeper.sh` but matches
+**nothing** in an inline `docker compose` line. Three of seven jobs were never
+tested. The gate now asserts discovered-jobs >= scheduled-lines, so a job it
+cannot see is a failure rather than a silence.
+
+## Gotcha 13 — a gate that could not fail, and how to spot one
+The first step asserted "0 app volumes survived" by counting volumes matching
+`bakeoff_(db_data|...)`. The compose project had been renamed to `ca-practice`
+long before. The pattern matched nothing, so the count was always 0 and the gate
+always passed — while three volumes sat there untouched.
+
+The fix is the general lesson: **never trust a negative result from a detector
+you have not seen produce a positive one.** That step now plants a volume, proves
+the pattern sees it, and only then believes the zero it reports afterwards. The
+same disease appeared twice more in one session — a junk-ARN check that "passed"
+because the binary under test did not exist, and a mock-capture count that would
+have been satisfied by its own health-check probe.
+
+## Gotcha 14 — the regression suite was calling Meta for real
+`wa_fanout.py` resolves `WA_API_BASE` from `ca.env`, which is
+`https://graph.facebook.com/v21.0`. Two gates started `mockmeta.py` on port 9099
+and then **never pointed anything at it**, so every suite run made live outbound
+calls to Meta with a bogus token. Meta answered `401`, which still leaves retry
+attempts, so the gate passed — and a later step burned the remaining attempts and
+failed on an unrelated assertion with an SSL error.
+
+`WA_API_BASE`/`WA_ALLOW_INSECURE` are now exported once at the top of the suite
+and the mock's captured-message count is asserted, so a run that escapes to the
+internet is visible. A test harness must never depend on a third party answering.
+
+## Gotcha 15 — permission rows are (perms, subperms), not one string
+`users_setup.php` asked for `perms='myactions_read'`. In `llx_rights_def` that is
+two columns: `perms='myactions'`, `subperms='read'`. The lookup matched zero rows
+and the `while` loop simply did not iterate — **three of five permissions were
+dropped in silence**, leaving `article1`/`article2` with 2 rights each. They could
+log in and do nothing, which sends every real task back to the admin account —
+precisely the shared-admin posture the per-user gate claims to prevent.
+
+That gate passed because it counted *accounts*, not *capability*. It now asserts
+the least-privileged non-admin holds a workable permission set and that every
+article can record a filing without the admin login. Any script that grants
+permissions now fails loudly when a permission resolves to no row.
+
+## Gotcha 16 — `hasRight()` returns 0 for any module Dolibarr has not activated
+```php
+// htdocs/user/class/user.class.php
+if (!isModEnabled($module)) { return 0; }
+```
+`$conf->modules` is populated only from **activated module descriptors**. A
+custom page that invents its own permission name (`hasRight('ca','write')`) will
+therefore refuse everyone, for ever, with no error to explain it. `custom/ca/`
+is a plain directory, not a registered module.
+
+The filings screen gates on the **agenda** permissions instead, which are real,
+enabled, and semantically honest — these filings *are* agenda events, and the
+screen closes the agenda event when it records one.
+
+## Gotcha 17 — an invalid CSRF token does not stop the page
+Dolibarr 24 defaults `MAIN_SECURITY_CSRF_WITH_TOKEN` to 3 (set in
+`conf.class.php`, not in the install SQL), so POST token checking is automatic
+once `main.inc.php` is included. But the two failure modes differ:
+
+- **token missing** → `http_response_code(403)` and `die`
+- **token wrong** → `$_POST` is unset, a warning is queued, and **the page keeps
+  executing** (`$_POST['id']` is even restored deliberately)
+
+So an action handler must be driven by `$action`, never by the bare presence of a
+POST field — otherwise it runs on a request that failed CSRF. Verified by POSTing
+a forged token at the live screen: HTTP 200, filing unchanged.
+
+## Gotcha 18 — a client added in the UI was invisible to the whole product
+`compliance_calendar.php` ran **only** from `deploy.sh`, over SSH. A client
+created through Dolibarr's own "New Third Party" form — with a complete
+GST-Monthly profile — got **zero** deadlines, zero document requests, zero
+reminders and no chase. Silently: no error, nothing in a log. The practice would
+not find out until a due date was missed.
+
+Verified by creating one and running every cron job that existed: all four counts
+came back 0. The calendar is now `./ca_job.sh calendar` nightly, it runs first in
+the chain (calendar → filings → documents → digest), and the morning email carries
+a `NO CALENDAR - not one deadline generated` line so the failure can never be
+silent again.
+
+## Gotcha 19 — the ActionComm property is `datef`, the COLUMN is `datep2`
+Re-dating an existing deadline with
+`UPDATE llx_actioncomm SET datep=..., datef=...` fails with
+`Unknown column 'datef'` — and because the whole statement fails, `datep` does not
+move either. `datef` is the property name on the ActionComm *object*; the table
+column is `datep2`.
+
+Worse than the bug: the code counted the re-dating as successful without checking
+the return value, so the job cheerfully reported "163 existing deadlines re-dated"
+on every run while nothing changed. **Count what the database accepted, not what
+you asked it to do.** The fix tests `$ok` and writes the DB error to stderr.
+
+## Holidays and government extensions
+Two small tables, both editable at `custom/ca/adjustments.php`:
+
+- `ca_holiday` — a due date landing on a Sunday or a listed holiday moves to the
+  next working day (section 10 of the General Clauses Act 1897). Saturdays are
+  treated as working days; add specific ones if a practice disagrees.
+- `ca_extension` — `filing_like` matches the START of a filing label, so one row
+  moves that deadline for every client at once. Longest matching prefix wins.
+
+Both are applied by the nightly calendar job to deadlines that **already exist**,
+not just new ones — otherwise an extension announced this morning would never
+reach the returns it was announced for.
+
+## Statutory rates are data
+`ca_rate` holds the late-fee table, editable at `custom/ca/rates.php`. The array
+in `ca_filing_lib.php` is both the seed and the fallback when no database handle
+is passed, so behaviour is identical if the table is missing. `pattern` is a
+regex the matching depends on and is deliberately read-only in the UI: a broken
+one silently zeroes every exposure figure.
+
+## Gotcha 20 — I built a feature that CAUSED the harm the product prevents
+An earlier version of `ca_calendar_lib.php` shifted any due date landing on a
+Sunday or a listed holiday to the next working day, citing section 10 of the
+General Clauses Act 1897. **That was wrong, and it was dangerous.**
+
+Section 10 only operates where an act must be done *"in any Court or Office"* and
+that office is **closed**. The GST and income-tax portals are open 24x7, so the
+triggering condition is never met and the due date does not move. GST has its own
+machinery for relief — s.37(4), s.39(6), s.168A — and CBIC issues a **notification**
+when it intends to grant it.
+
+The direction of the error is what makes this serious:
+
+> Telling a CA a date **earlier** than the statute is harmless.
+> Telling a **later** one means he files late and pays the fee.
+
+Shifting Sunday to Monday did exactly that, on **163 deadlines**. The gate made it
+worse: it asserted *"0 deadlines fall on a Sunday"*, so it enforced the bug.
+
+Now: holidays are an **advisory flag**, never a date change. `ca_extension` is the
+only thing that moves a date, which matches how relief is actually granted. The
+gate was inverted — Sundays must now be PRESENT (177 of them) and unmoved.
+
+## Gotcha 21 — the Act itself was replaced, and every citation went stale
+**The Income-tax Act 1961 was superseded by the Income-tax Act 2025 with effect
+from 1 April 2026.** FY 2026-27 — the year this calendar generates — is governed by
+the **new Act**:
+
+| Concept | 1961 Act | ITA 2025 |
+|---|---|---|
+| Return of income | s.139 | **s.263** |
+| Tax audit | s.44AB | **s.63** |
+| Advance tax | s.207/208/211 | **s.403/404/408** |
+| Interest | s.234B/234C | **s.424/425** |
+| Late fee | s.234F | **s.428** |
+| Presumptive | s.44AD/44ADA | **s.58(2) Table Sl.1/Sl.3** |
+
+The *dates* largely survived the transition; the *citations* did not. Anything in
+this repo naming a 1961 section for FY2026-27 is pointing at a repealed provision.
+`statute_test.php` carries the provision beside every assertion for exactly this
+reason — so the next person can see what a rule claims to rest on.
+
+Separately, **Finance Act 2026 substituted Explanation 2** and moved non-audit
+**business and profession** assessees from 31 July to **31 August**. Salaried
+assessees stay on 31 July.
+
+## Gotcha 22 — a mock that cannot fail hides the code it exists to test
+`mockmeta.py` was eleven lines and always returned HTTP 200. Because of that,
+`wa_fanout.py`'s error handling had **never once executed**. It caught
+`except Exception` and stored `str(ex)` — which for an `HTTPError` is only
+`"HTTP Error 400: Bad Request"`. Meta's structured `error.code` lives in the
+response **body**, which was never read.
+
+So every failure looked identical and was retried three times. An expired token
+(190) would have failed all ~880 reminders, three times each, before anyone was
+told. A number not on WhatsApp (131026) was retried forever instead of telling the
+CA to pick up the phone.
+
+Meta's own instruction: *"Build your app's error handling around error codes
+instead of subcodes or HTTP response status codes."* HTTP status is not even
+documented for the Cloud API messages endpoint.
+
+The sender now classifies into three buckets — **retryable** (the closed set Meta
+actually says to retry), **permanent** (straight to the cap so the CA hears today),
+and **account-fatal** (halt the run; continuing just multiplies the damage).
+The mock now returns Meta's real error envelope and can inject any of them.
+
+**A mock that cannot fail is the same defect as a gate that cannot fail.**
+
 ## Known remaining, stated plainly
-- **DPDP §8(7) retention/erasure** — no policy or deletion path. Data and
-  backups accumulate. This is the one audit finding not closed.
+- **DPDP §8(7) retention and erasure — now implemented.** `ca_retention_policy`
+  holds the statutory floors (income-tax 6y, GST 6y, ICAI 7y, Companies Act 8y);
+  the binding period is the longest of them. An erasure request is recorded and
+  **held** until that period expires — a CA cannot erase inside the statutory
+  window by clicking a button, because the same law that lets the client ask is
+  outranked by the law requiring the practice to keep records. When it falls due,
+  personal identifiers are cleared and the **filing record is deliberately kept**:
+  what was filed, for which period, under which acknowledgement. That is the
+  practice's own evidence of having filed, and destroying it would breach the
+  retention duty that justified the hold.
+  Every erasure writes a `ca_erasure_log` row storing a **sha256 of the name, not
+  the name** — the log evidences that an erasure happened without re-storing the
+  identifier it erased. `./ca_job.sh retention` runs weekly and is a **dry run by
+  default**; erasure itself is a deliberate act on `custom/ca/privacy.php`.
+  The periods are defaults, not legal advice. Confirm them with your own counsel.
 - Real Meta delivery, a real SMTP relay with SPF/DKIM/DMARC, and the VPS itself
   still need the CA's own accounts.
 - `bootstrap-vps.sh` runs to completion on `debian:12 --privileged`; the SSH and

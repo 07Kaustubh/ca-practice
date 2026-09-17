@@ -6,6 +6,10 @@
 # DOCKER-USER rule in bootstrap-vps.sh is the backstop, not the primary control.
 services:
   db:
+    # MariaDB defaulted to UTC while PHP runs Asia/Kolkata, so every row created
+    # by the app (datec, IST) was stamped `tms` by the DB 5h30m EARLIER - records
+    # appeared "modified before they were created" in the audit trail.
+    command: ["--default-time-zone=+05:30"]
     image: mariadb@sha256:2d2f4095530294735a857cfe22bb101e19b0849b416911c796ec4aa81b164a62   # was mariadb:11
     restart: unless-stopped
     environment:

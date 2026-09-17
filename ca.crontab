@@ -6,3 +6,24 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */10 * * * * cd /opt/ca && ./sweeper.sh   >> /var/log/ca-sweeper.log 2>&1
 */10 * * * * cd /opt/ca && ./wa_fanout.py >> /var/log/ca-wa.log 2>&1
 17 2 * * *   cd /opt/ca && ./backup.sh    >> /var/log/ca-backup.log 2>&1
+# Document chase: aimed at CLIENTS, weekday mornings. The escalation and the
+# one-message-per-client-per-day cap live in the script, not the schedule.
+30 9 * * 1-5 cd /opt/ca && ./chase_clients.py --commit >> /var/log/ca-chase.log 2>&1
+# These four run PHP inside the app container. They go through ca_job.sh, which
+# sources ca.env/secrets.env first: `docker compose` cannot parse the compose
+# file without DB_PASSWORD, so calling it inline here failed every night.
+# The CA's morning email: this week's blocked filings + data-quality warnings.
+0 8 * * 1-6  cd /opt/ca && ./ca_job.sh digest  >> /var/log/ca-digest.log 2>&1
+# Refresh the document requests as new deadlines come into the horizon.
+15 6 * * *   cd /opt/ca && ./ca_job.sh docs    >> /var/log/ca-docs.log 2>&1
+# Recompute filing status and late-fee exposure before the morning digest reads it.
+5 6 * * *    cd /opt/ca && ./ca_job.sh filings >> /var/log/ca-filings.log 2>&1
+# Regenerate the statutory calendar. This ran ONLY from deploy.sh over SSH, so a
+# client added through the web UI got no deadlines, no document requests and no
+# reminders - silently, with nothing to alert anyone. Idempotent, and first in
+# the chain: calendar -> filings -> documents -> digest.
+50 4 * * *   cd /opt/ca && ./ca_job.sh calendar >> /var/log/ca-calendar.log 2>&1
+# DPDP retention sweep. Promotes erasure requests whose statutory hold has
+# expired so they surface on the privacy screen. Reports only - erasure itself
+# is a deliberate act, taken by a person, on the screen.
+20 5 * * 1   cd /opt/ca && ./ca_job.sh retention >> /var/log/ca-retention.log 2>&1

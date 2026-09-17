@@ -72,3 +72,56 @@ foreach ($svcs as $s) {
   if ($p->create($user)>0) $made++;
 }
 echo "  CA service catalogue: $made created (18% GST)\n";
+
+// ── the practice's own bank account ─────────────────────────────────────────
+// modBanque was enabled but no account was ever created, so the dashboard's
+// balances widget read "No financial accounts recorded" and the funds-management
+// half of the brief was, in practice, absent. One current account is the minimum
+// that makes the module real; the CA renames it and adds his own.
+require_once DOL_DOCUMENT_ROOT.'/compta/bank/class/account.class.php';
+$acc = new Account($db);
+$exists = $db->query("SELECT rowid FROM ".MAIN_DB_PREFIX."bank_account WHERE ref='CA-CURRENT'");
+if ($exists && $db->num_rows($exists) > 0) {
+    echo "  bank account: already present\n";
+} else {
+    $acc->ref           = 'CA-CURRENT';
+    $acc->label         = getenv('CA_FIRM_NAME') ? getenv('CA_FIRM_NAME').' - Current Account' : 'Practice Current Account';
+    $acc->courant       = Account::TYPE_CURRENT;
+    $acc->type          = Account::TYPE_CURRENT;
+    $acc->currency_code = 'INR';
+    $acc->country_id    = 102;          // India
+    $acc->date_solde    = dol_now();
+    $acc->solde         = 0;
+    $acc->clos          = 0;
+    $acc->status        = 1;
+    $r = $acc->create($user);
+    echo $r > 0 ? "  bank account: CA-CURRENT created (INR)\n"
+                : "  bank account: FAILED - ".$acc->error."\n";
+}
+
+// ── the dashboard the CA actually lands on ──────────────────────────────────
+// Stock Dolibarr ships exactly the widgets a practice needs; the default set was
+// simply the wrong ones. Out: supplier orders, supplier invoices, product stock
+// alerts, product distribution, "previous login Unknown" - none of which a CA
+// practice has any use for, all of which rendered as empty boxes and noise.
+// In: upcoming deadlines, unpaid fees, bank balances, clients.
+$want_boxes = array(
+  'box_actions_future.php' => 1,   // WHAT IS COMING UP - the reason he opens this
+  'box_factures_imp.php'   => 2,   // unpaid fees
+  'box_comptes.php'        => 3,   // bank + cash balances
+  'box_clients.php'        => 4,   // latest clients
+  'box_factures.php'       => 5,   // latest invoices
+  'box_graph_invoices_permonth.php' => 6,
+);
+$db->query("DELETE FROM ".MAIN_DB_PREFIX."boxes WHERE position=0 AND entity=".$conf->entity);
+$nb=0;
+foreach ($want_boxes as $file=>$ord) {
+  $r=$db->query("SELECT rowid FROM ".MAIN_DB_PREFIX."boxes_def WHERE file='".$db->escape($file)."'");
+  if ($r && $o=$db->fetch_object($r)) {
+    $db->query("INSERT INTO ".MAIN_DB_PREFIX."boxes (box_id,position,box_order,fk_user,entity)
+                VALUES (".(int)$o->rowid.",0,".(int)$ord.",0,".$conf->entity.")");
+    $nb++;
+  }
+}
+echo "  dashboard: $nb CA-relevant widgets (supplier/product/login noise removed)\n";
+

@@ -347,3 +347,25 @@ These are unproven, not broken. Do not tell him otherwise.
 
 Also cosmetic: the "Agenda" menu label still says Agenda.
 `lbl.mjs` is a dev-only verification script and needs `npm install` first.
+
+
+## Running the practice from the browser
+
+Everything below is a screen. None of it needs a shell.
+
+| Screen | What it is for |
+|---|---|
+| `/custom/ca/client.php` | Add or edit a client. PAN/GSTIN/TAN are validated, and the statutory calendar is generated **on save** — a client added here is never invisible. |
+| `/custom/ca/filings.php` | Record that a return went out, with its acknowledgement number. `?view=ready` / `?view=filed` narrow the list. |
+| `/custom/ca/rates.php` | Edit the late-fee rates when a statute changes. The `pattern` column is deliberately read-only — it is a regex the matching depends on. |
+| `/custom/ca/adjustments.php` | Record a gazetted holiday, or a government extension. An extension moves that due date for **every** client at once. |
+| `/custom/ca/privacy.php` | Retention policy, erasure requests, and the erasure log (DPDP §8(7)). |
+
+The calendar also regenerates nightly (`./ca_job.sh calendar`), so a profile
+edited in the UI is reflected without waiting for anyone to deploy. Changing a
+client's GST scheme retires the deadlines the old scheme implied — except any
+already filed, which stay as evidence.
+
+**Server configuration stays on the host**, in `ca.env` and `secrets.env`: SMTP,
+WhatsApp credentials and backup keys are not editable from a web form, on
+purpose.

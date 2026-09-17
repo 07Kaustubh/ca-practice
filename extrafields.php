@@ -23,6 +23,10 @@ $want = array(
   array('roc_applicable','ROC/MCA filings','boolean',23,3,''),
   // practice economics
   array('fee_annual','Annual retainer (INR)','price',30,10,''),
+  // Decides GSTR-9: the annual return is exempt up to Rs 2 crore aggregate
+  // turnover. Without this the calendar either invents the obligation for
+  // every small client or misses it for every large one.
+  array('turnover_annual','Aggregate turnover (INR)','price',31,10,''),
   array('billing_cycle','Billing cycle','select',31,0,'Annual,Half-yearly,Quarterly,Monthly,Per filing'),
   // 194J applicability is a function of the PAYER's status and threshold, never
   // of a database row id. It must be recorded per client, not guessed.

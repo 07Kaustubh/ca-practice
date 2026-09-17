@@ -26,18 +26,35 @@ else { $g->name='Practice Staff'; $g->note='Articles/assistants: clients + deadl
 if($gid>0){
   // societe (clients) + agenda (deadlines) read/write. Deliberately NOT: setup,
   // user admin, accounting, or delete.
-  $want=array('societe'=>array('lire','creer'),'agenda'=>array('myactions_read','allactions_read','myactions_create'));
-  $n=0;
-  foreach($want as $mod=>$perms){
-    foreach($perms as $p){
-      $q=$db->query("SELECT id FROM ".MAIN_DB_PREFIX."rights_def
-                     WHERE module='".$db->escape($mod)."' AND perms='".$db->escape($p)."' AND entity=".$conf->entity);
-      while($q && $o=$db->fetch_object($q)){
-        $db->query("INSERT IGNORE INTO ".MAIN_DB_PREFIX."usergroup_rights (entity,fk_usergroup,fk_id)
-                    VALUES (".$conf->entity.",".(int)$gid.",".(int)$o->id.")"); $n++;
-      }
+  // rights_def splits a permission across perms AND subperms ('myactions' +
+  // 'read'), so the flat 'myactions_read' used here matched no rows and three of
+  // the five permissions were dropped in silence. The articles could log in and
+  // do nothing, which sends the whole practice back to the admin account - the
+  // exact posture the per-user gate claims to prevent.
+  $want=array(
+    array('societe','lire',''),
+    array('societe','creer',''),
+    array('agenda','myactions','read'),
+    array('agenda','allactions','read'),
+    array('agenda','myactions','create'),
+    array('agenda','allactions','create'),
+  );
+  $n=0; $missing=array();
+  foreach($want as $w){
+    list($mod,$p,$sub)=$w;
+    $sql="SELECT id FROM ".MAIN_DB_PREFIX."rights_def WHERE module='".$db->escape($mod)."'"
+        ." AND perms='".$db->escape($p)."' AND entity=".$conf->entity
+        ." AND ".($sub===''?"(subperms IS NULL OR subperms='')":"subperms='".$db->escape($sub)."'");
+    $q=$db->query($sql); $hit=0;
+    while($q && $o=$db->fetch_object($q)){
+      $db->query("INSERT IGNORE INTO ".MAIN_DB_PREFIX."usergroup_rights (entity,fk_usergroup,fk_id)
+                  VALUES (".$conf->entity.",".(int)$gid.",".(int)$o->id.")"); $n++; $hit++;
     }
+    if(!$hit) $missing[]=$mod.'/'.$p.($sub?'/'.$sub:'');
   }
+  // A permission that resolves to nothing must be LOUD. Granting fewer rights
+  // than intended, quietly, is how the staff accounts became decorative.
+  if($missing){ fwrite(STDERR,"  FATAL: no rights_def row for: ".implode(', ',$missing)."\n"); exit(1); }
   echo "  group 'Practice Staff' id=$gid with $n permission(s)\n";
 }
 
