@@ -219,3 +219,205 @@ function ca_period_label($p)
     $t = mktime(0, 0, 0, (int) $m[2], 1, (int) $m[1]);
     return $t === false ? $p : date('M Y', $t);
 }
+
+/**
+ * Mark every outstanding document for one filing as received.
+ *
+ * This verb did not exist, and its absence was not merely a missing feature.
+ * chase_clients.py chases on ca_docrequest.status='pending', so a client who
+ * had already sent everything kept receiving WhatsApp messages asking for it.
+ * The only writer of 'received' was ca_record_filing() - a side-effect of
+ * recording a filing - so the documents could not be acknowledged until after
+ * the return went out, which is the wrong way round.
+ *
+ * Deliberately takes no per-document argument. The CA opens an email with three
+ * attachments; asking him to tick three boxes is bookkeeping for the machine.
+ * One click per filing is the whole interaction.
+ *
+ * @return array('ok'=>bool, 'msg'=>string, 'n'=>int)
+ */
+function ca_mark_documents_received($db, $filingId, $uid)
+{
+    $filingId = (int) $filingId;
+    if ($filingId <= 0) return array('ok' => false, 'msg' => 'no filing identified', 'n' => 0);
+
+    $r = $db->query("SELECT f.rowid,f.fk_actioncomm,f.filing,f.period,f.status,s.nom
+                       FROM ca_filing f
+                       LEFT JOIN ".MAIN_DB_PREFIX."societe s ON s.rowid = f.fk_soc
+                      WHERE f.rowid = ".$filingId);
+    if (!$r || !($f = $db->fetch_object($r))) return array('ok' => false, 'msg' => "filing {$filingId} does not exist", 'n' => 0);
+    if ((int) $f->fk_actioncomm <= 0)         return array('ok' => false, 'msg' => 'that filing has no document requests', 'n' => 0);
+
+    $db->begin();
+    $ok = $db->query("UPDATE ca_docrequest SET status='received', received_at=NOW()
+                       WHERE fk_actioncomm=".(int) $f->fk_actioncomm." AND status='pending'");
+    if (!$ok) { $db->rollback(); return array('ok' => false, 'msg' => 'database refused: '.$db->lasterror(), 'n' => 0); }
+    $n = (int) $db->affected_rows($ok);
+
+    // The filing is now unblocked. Recompute here rather than waiting for the
+    // nightly job, so the screen he is looking at tells him the truth.
+    if ($f->status === 'pending') {
+        $db->query("UPDATE ca_filing SET status='ready' WHERE rowid=".$filingId."
+                     AND NOT EXISTS (SELECT 1 FROM ca_docrequest d
+                                      WHERE d.fk_actioncomm=".(int) $f->fk_actioncomm." AND d.status='pending')");
+    }
+    $db->commit();
+
+    if ($n === 0) return array('ok' => true, 'n' => 0,
+        'msg' => "Nothing was outstanding for {$f->filing} {$f->period} - already marked received.");
+    return array('ok' => true, 'n' => $n,
+        'msg' => "{$n} document(s) received for {$f->nom} - {$f->filing} {$f->period}. The chase stops for these.");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ONE-OFF TASKS
+//
+// Everything in this list was DERIVED from a client profile, which made the
+// product a generator rather than a to-do list. A practice has plenty of work
+// that no statute implies - "collect Form 16 from Sharma", "reply to the 143(1)
+// notice", "renew the DSC" - and none of it matched the statutory label regex,
+// so none of it could ever appear on the one screen he lives in. He kept a
+// second list somewhere else, which is the failure this product exists to end.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ad-hoc rows are prefixed so every other rule can tell them from a statute. */
+define('CA_TASK_PREFIX', 'Task: ');
+
+function ca_is_task($filing) { return strpos((string) $filing, CA_TASK_PREFIX) === 0; }
+
+/**
+ * Add a one-off task. It becomes a real agenda event, so it inherits the same
+ * calendar and the same email reminder as every statutory date - a task that
+ * does not remind him is just a note.
+ *
+ * @param $socid  client it belongs to, or 0 for practice-wide
+ * @return array('ok'=>bool,'msg'=>string)
+ */
+function ca_add_task($db, $socid, $what, $due, $uid, $remindDays = 7)
+{
+    global $conf;
+    require_once DOL_DOCUMENT_ROOT.'/comm/action/class/actioncomm.class.php';
+    require_once DOL_DOCUMENT_ROOT.'/user/class/user.class.php';
+
+    $socid = (int) $socid; $uid = (int) $uid;
+    $what  = trim((string) $what);
+    $due   = trim((string) $due);
+
+    if ($what === '')  return array('ok' => false, 'msg' => 'Describe the task in a few words.');
+    if (mb_strlen($what) > 80) return array('ok' => false, 'msg' => 'Keep the task under 80 characters.');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $due)) return array('ok' => false, 'msg' => "'{$due}' is not a date (YYYY-MM-DD).");
+    list($y, $m, $d) = array_map('intval', explode('-', $due));
+    if (!checkdate($m, $d, $y)) return array('ok' => false, 'msg' => "'{$due}' is not a real date.");
+
+    $nom = 'the practice';
+    if ($socid > 0) {
+        $rs = $db->query("SELECT nom FROM ".MAIN_DB_PREFIX."societe WHERE rowid=".$socid);
+        if (!$rs || !($os = $db->fetch_object($rs))) return array('ok' => false, 'msg' => "client {$socid} does not exist");
+        $nom = $os->nom;
+    }
+
+    $label = CA_TASK_PREFIX.$what.($socid > 0 ? ' - '.$nom : '');
+    $ts = dol_mktime(10, 0, 0, $m, $d, $y);
+
+    // Refuse a duplicate outright rather than quietly making a second one.
+    $dup = $db->query("SELECT id FROM ".MAIN_DB_PREFIX."actioncomm
+                        WHERE label='".$db->escape($label)."' AND DATE(datep)='".$db->escape($due)."'");
+    if ($dup && $db->num_rows($dup) > 0) return array('ok' => false, 'msg' => 'That task already exists on that date.');
+
+    $u = new User($db); $u->fetch($uid); $u->getrights();
+
+    $db->begin();
+    $a = new ActionComm($db);
+    $a->type_code = 'AC_OTH';          // same code the statutory dates use, so it is one list
+    $a->label = $label;
+    $a->datep = $ts; $a->datef = $ts + 3600;
+    $a->socid = $socid > 0 ? $socid : 0;
+    $a->userownerid = $uid; $a->percentage = 0;
+    $aid = $a->create($u);
+    if ($aid <= 0) { $db->rollback(); return array('ok' => false, 'msg' => 'could not create the task: '.$a->error); }
+
+    $db->query("INSERT IGNORE INTO ".MAIN_DB_PREFIX."actioncomm_resources
+                (fk_actioncomm,element_type,fk_element,mandatory,transparency)
+                VALUES (".$aid.",'user',".$uid.",0,0)");
+
+    // Same clamp the statutory generator uses: a reminder dated in the past is
+    // purged by Dolibarr's poller and would vanish without trace.
+    $remind_at = max($ts - ((int) $remindDays) * 86400, dol_now() + 120);
+    if ($ts > dol_now()) {
+        $db->query("INSERT INTO ".MAIN_DB_PREFIX."actioncomm_reminder
+          (dateremind,typeremind,fk_user,fk_soc,offsetvalue,offsetunit,status,entity,fk_actioncomm)
+          VALUES ('".$db->idate($remind_at)."','email',".$uid.",".($socid > 0 ? $socid : 0).",
+                  ".((int) $remindDays).",'d',0,".$conf->entity.",".$aid.")");
+    }
+
+    $ok = $db->query("INSERT INTO ca_filing (fk_soc,fk_actioncomm,filing,period,due,status)
+        VALUES (".$socid.",".$aid.",'".$db->escape(CA_TASK_PREFIX.$what)."',
+                '".$db->escape(date('Y-m', $ts))."','".$db->escape($due)."','pending')");
+    if (!$ok) { $db->rollback(); return array('ok' => false, 'msg' => 'could not list the task: '.$db->lasterror()); }
+    $db->commit();
+
+    return array('ok' => true, 'msg' => "Added: {$what}".($socid > 0 ? " for {$nom}" : '')
+        .", due ".dol_print_date($ts, 'day').($ts > dol_now() ? " - you will be reminded {$remindDays} days before." : '.'));
+}
+
+/** Tick off a one-off task. No acknowledgement number: there is no portal here. */
+function ca_complete_task($db, $id, $uid)
+{
+    $id = (int) $id;
+    $r = $db->query("SELECT rowid,fk_actioncomm,filing,status FROM ca_filing WHERE rowid=".$id);
+    if (!$r || !($f = $db->fetch_object($r))) return array('ok' => false, 'msg' => "task {$id} does not exist");
+    if (!ca_is_task($f->filing))  return array('ok' => false, 'msg' => 'That is a statutory return - it needs its acknowledgement number.');
+    if ($f->status === 'filed')   return array('ok' => false, 'msg' => 'Already done.');
+
+    $db->begin();
+    $ok = $db->query("UPDATE ca_filing SET status='filed', filed_at=CURDATE(), filed_by=".(int) $uid.",
+                        late_days=GREATEST(0,DATEDIFF(CURDATE(),due)), exposure_inr=0, note='one-off task, completed'
+                      WHERE rowid=".$id);
+    if (!$ok) { $db->rollback(); return array('ok' => false, 'msg' => $db->lasterror()); }
+    if ((int) $f->fk_actioncomm > 0)
+        $db->query("UPDATE ".MAIN_DB_PREFIX."actioncomm SET percent=100 WHERE id=".(int) $f->fk_actioncomm);
+    $db->commit();
+    return array('ok' => true, 'msg' => 'Done: '.substr($f->filing, strlen(CA_TASK_PREFIX)));
+}
+
+/**
+ * Remove a row he does not owe.
+ *
+ * A one-off task is his, so it is deleted. A STATUTORY return is not - deleting
+ * a GSTR-3B because it is inconvenient is precisely the failure this product
+ * exists to prevent - so it is marked not-applicable with a reason and stays
+ * auditable. Same button, honest difference.
+ */
+function ca_drop_filing($db, $id, $reason, $uid)
+{
+    $id = (int) $id;
+    $r = $db->query("SELECT rowid,fk_actioncomm,filing,status FROM ca_filing WHERE rowid=".$id);
+    if (!$r || !($f = $db->fetch_object($r))) return array('ok' => false, 'msg' => "row {$id} does not exist");
+    if ($f->status === 'filed') return array('ok' => false, 'msg' => 'That has already been filed - it stays on the record.');
+
+    $db->begin();
+    if (ca_is_task($f->filing)) {
+        $db->query("DELETE FROM ".MAIN_DB_PREFIX."actioncomm_reminder WHERE fk_actioncomm=".(int) $f->fk_actioncomm);
+        $db->query("DELETE FROM ".MAIN_DB_PREFIX."actioncomm_resources WHERE fk_actioncomm=".(int) $f->fk_actioncomm);
+        $db->query("DELETE FROM ca_docrequest WHERE fk_actioncomm=".(int) $f->fk_actioncomm);
+        $db->query("DELETE FROM ".MAIN_DB_PREFIX."actioncomm WHERE id=".(int) $f->fk_actioncomm);
+        $ok = $db->query("DELETE FROM ca_filing WHERE rowid=".$id);
+        $msg = 'Task removed.';
+    } else {
+        $why = trim((string) $reason);
+        if ($why === '') { $db->rollback(); return array('ok' => false, 'msg' => 'Say why this return does not apply - it stays on the record either way.'); }
+        // Build the note in PHP. MySQL has no '.' concatenation operator, so doing
+        // it SQL-side is a runtime syntax error, not a style choice.
+        $note = 'does not apply: '.mb_substr($why, 0, 180);
+        $ok = $db->query("UPDATE ca_filing SET status='not_applicable',
+                            note='".$db->escape($note)."'
+                          WHERE rowid=".$id);
+        if ((int) $f->fk_actioncomm > 0)
+            $db->query("UPDATE ".MAIN_DB_PREFIX."actioncomm SET percent=100 WHERE id=".(int) $f->fk_actioncomm);
+        $db->query("UPDATE ca_docrequest SET status='received' WHERE fk_actioncomm=".(int) $f->fk_actioncomm." AND status='pending'");
+        $msg = "Marked not applicable - kept on the record with your reason, not deleted.";
+    }
+    if (!$ok) { $db->rollback(); return array('ok' => false, 'msg' => $db->lasterror()); }
+    $db->commit();
+    return array('ok' => true, 'msg' => $msg);
+}

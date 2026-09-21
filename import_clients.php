@@ -13,9 +13,12 @@ $fh=fopen($path,'r');
 $hdr=fgetcsv($fh);
 if (!$hdr) { fwrite(STDERR,"  FAIL: empty CSV\n"); exit(1); }
 $required=array('name','gstin','pan','email','whatsapp','optin',
-                'entity_type','gst_scheme','tan','tax_audit','roc_applicable','fee_annual','billing_cycle',
-                'turnover_annual');
-$optional=array('tds_applicable');
+                'entity_type','gst_scheme','tan','tax_audit','roc_applicable','fee_annual','billing_cycle');
+// OPTIONAL on purpose. Adding a field must never invalidate a CSV a practice is
+// already using - and both of these mean "not stated", which is a real answer:
+// a blank turnover leaves GSTR-9 undecided (the morning email says so rather
+// than guessing), and a blank remind_days falls back to the practice default.
+$optional=array('tds_applicable','turnover_annual','remind_days');
 $missing=array_diff($required,$hdr);
 if ($missing) { fwrite(STDERR,"  FAIL: CSV missing columns: ".implode(',',$missing)."\n"); exit(1); }
 $ok=0;$fail=0;$skip=0;$errs=array();$line=1;
@@ -60,6 +63,8 @@ while(($r=fgetcsv($fh))!==false){
   $s->array_options['options_fee_annual']=$row['fee_annual'];
   // decides whether GSTR-9 applies at all (exempt up to Rs 2 crore)
   $s->array_options['options_turnover_annual']=isset($row['turnover_annual'])?$row['turnover_annual']:0;
+  // blank stays blank: an empty value means 'use the practice default'
+  $s->array_options['options_remind_days']=(isset($row['remind_days']) && $row['remind_days']!=='')?(int)$row['remind_days']:null;
   $s->array_options['options_billing_cycle']=$row['billing_cycle'];
   $s->array_options['options_tds_applicable']=isset($row['tds_applicable'])?$row['tds_applicable']:0;
   $id=$s->create($u);

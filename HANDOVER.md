@@ -117,6 +117,24 @@ UI over an SSH tunnel until a TLS reverse proxy is in front.
   Untested on a real host.
 - **No log rotation** on `ca-jobs.log` or the host cron logs. Add logrotate.
 
+**The full host crontab** is shipped as `ca.crontab` — install it rather than
+retyping it. **Ten scheduled lines.** The six that run PHP inside the container go
+through `ca_job.sh`, which sources `ca.env`/`secrets.env` first: `docker compose`
+cannot even parse the compose file without `DB_PASSWORD`, so calling it inline
+from cron failed silently every night (Gotcha 12).
+
+    50 4 * * *   ./ca_job.sh calendar    statutory dates; idempotent
+    5  6 * * *   ./ca_job.sh filings     filing ledger + late-fee exposure
+    15 6 * * *   ./ca_job.sh docs        document requests coming into horizon
+    0  8 * * 1-6 ./ca_job.sh digest      the morning email
+    20 5 * * 1   ./ca_job.sh retention   DPDP sweep - DRY RUN, reports only
+    40 6 1 * *   ./ca_job.sh fees        the month's retainer invoices
+
+`fees` is idempotent per period — a second run in the same month raises nothing,
+so it cannot double-bill. Review them under Billing as usual. It used to sit
+behind a deploy-time env flag, which meant routine monthly billing required an
+SSH session.
+
 ## Regression gate — run this before any handover
 Every defect found in review traced to one omission: the suite had never been run
 against EMPTY volumes. `./regression.sh` does exactly that and is the standing gate.
@@ -420,6 +438,79 @@ and **account-fatal** (halt the run; continuing just multiplies the damage).
 The mock now returns Meta's real error envelope and can inject any of them.
 
 **A mock that cannot fail is the same defect as a gate that cannot fail.**
+
+## Gotcha 23 — the product was a task GENERATOR, not a to-do list
+Every row in the filings list came from the statutory rules. A practice has
+plenty of work no statute implies — collect a Form 16, answer a 143(1) notice,
+renew a DSC — and none of it matched the label regex, so none of it could appear
+on the one screen the CA lives in. He kept a second list somewhere else, which is
+the failure this product exists to end.
+
+Measured as CRUD, the core noun scored **2 of 4**: no Create, no Delete. Both now
+exist on the same screen. A one-off task becomes a real agenda event, so it
+inherits the same email reminder as a statutory date — a task that does not remind
+you is just a note.
+
+Deletion is deliberately asymmetric. A one-off task is his, so **Remove** deletes
+it. A statutory return is not: **N/A** marks it not-applicable *with a reason* and
+keeps it. Same button, honest difference.
+
+## Gotcha 24 — the screen offered an action only for rows that could never reach it
+`filings.php` listed `WHERE f.status = 'ready'`. A filing became `ready` only when
+every document was `received`. And the ONLY writer of `received` was
+`ca_record_filing()` — a side-effect of recording the filing.
+
+So: it could not be recorded until the documents were in, and the documents could
+not be marked in until it was recorded. The demo worked solely because
+`seed_demo.sh` wrote `received` with direct SQL. On a real install, once the
+seeded rows were filed the screen would have been **permanently empty**.
+
+Worse than a dead screen: `chase_clients.py` chases on outstanding documents, so a
+client who had already sent everything kept receiving WhatsApp messages asking for
+it. That is not a missing feature, it damages the relationship the product is
+supposed to protect.
+
+The list now shows everything DUE. Documents are a column, never a lock, and one
+click says they arrived.
+
+## Gotcha 25 — a test double that depended on the network it replaces
+`mockmeta.py` bound its port and then never answered. No error, process alive.
+
+`http.server.HTTPServer.server_bind()` calls `socket.getfqdn()` to fill in a
+`server_name` this mock never reads — and that call does a reverse DNS lookup. On
+a machine whose reverse DNS is slow or unreachable it blocks indefinitely, and it
+happens **after bind() but before listen()**, so the port looks taken while
+nothing responds. The suite's readiness probe reported "mock did not start" and
+five WhatsApp gates went red, for a hostname nobody wanted.
+
+Overridden to skip it. **A test double must not depend on the network it exists to
+replace.**
+
+## Gotcha 26 — two gates that failed for reasons that were not the product
+Both of these read as product defects and were not. Worth knowing, because this
+repo is public and someone else will run the suite on a different machine.
+
+- **The prod gate hardcoded port 8443.** Its claim is "the prod profile deploys
+  and serves HTTPS through Caddy", not that one number. On a machine where
+  something else already held 8443 it failed with `address already in use`. It now
+  picks a free port at run time.
+- **The chase gate depended on the wall clock.** `chase_clients.py` only chases
+  documents due within 10 days — correctly, nobody wants nagging about a return
+  due in a fortnight. Run the suite on a date when the nearest deadline is 16 days
+  out and the chase legitimately does nothing, so the gate's `grep` found no SKIP
+  line and reported red. It now seeds a document into the window before asserting.
+
+## Gotcha 27 — an optional new column invalidated every existing CSV
+`import_clients.php` checks the header against a `$required` list. Adding
+`remind_days` to it meant every CSV a practice was already using failed with
+`CSV missing columns`. Both `remind_days` and `turnover_annual` are now
+`$optional`: `array_combine()` simply does not create the key, and both are
+`isset()`-guarded. **Adding a field must never invalidate a file someone already
+has.**
+
+Related: `turnover_annual` was in the importer, the extrafields and the statutory
+rules, but was never collected by the client form — so a client added through the
+UI always had turnover 0 and was silently never given a GSTR-9.
 
 ## Known remaining, stated plainly
 - **DPDP §8(7) retention and erasure — now implemented.** `ca_retention_policy`

@@ -289,6 +289,22 @@ echo "  requests=$dr clients=$cl audit-event-junk=$junk"
 [ "${junk:-1}" = "0" ] && echo "  no audit events mistaken for filings" || { echo "  FAIL: $junk audit events treated as filings"; fail=1; }
 
 step "client chase respects opt-in and one-per-day"
+# chase_clients.py only chases documents due within 10 days - correctly, nobody
+# wants nagging about a return due in a fortnight. But that made this gate depend
+# on the WALL CLOCK: run the suite on a date when the nearest deadline is 16 days
+# out and the chase legitimately does nothing, the grep below finds no SKIP line,
+# and a green product reports red. Put one document inside the window first.
+noopt=$(Q "SELECT s.rowid FROM llx_societe s LEFT JOIN llx_societe_extrafields e ON e.fk_object=s.rowid
+           WHERE s.client=1 AND COALESCE(e.whatsapp_optin,0)=0 LIMIT 1;")
+yesopt=$(Q "SELECT s.rowid FROM llx_societe s JOIN llx_societe_extrafields e ON e.fk_object=s.rowid
+            WHERE s.client=1 AND e.whatsapp_optin=1 AND COALESCE(e.whatsapp_number,'')<>'' LIMIT 1;")
+for c in "$noopt" "$yesopt"; do
+  [ -n "$c" ] && Q "UPDATE ca_docrequest SET due=DATE_ADD(CURDATE(), INTERVAL 3 DAY), last_chase=NULL
+                     WHERE fk_soc=$c AND status='pending' LIMIT 4;" >/dev/null
+done
+inwindow=$(Q "SELECT COUNT(*) FROM ca_docrequest WHERE status='pending' AND DATEDIFF(due,CURDATE()) BETWEEN 0 AND 10;")
+echo "  documents inside the 10-day chase window: $inwindow"
+[ "${inwindow:-0}" -ge 1 ] || { echo "  FAIL: could not put a document in the chase window"; fail=1; }
 out=$(WA_ALLOW_INSECURE=1 WA_API_BASE=http://127.0.0.1:9099 python3 chase_clients.py 2>&1)
 echo "$out" | tail -1 | sed 's/^/  /'
 echo "$out" | grep -q "Traceback" && { echo "  FAIL: chase crashed"; echo "$out" | tail -3 | sed 's/^/      /'; fail=1; }
@@ -555,7 +571,14 @@ step "PROD PROFILE: the config that actually ships"
 docker compose down -v >/dev/null 2>&1
 export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
 export CA_SMTP_HOST=smtp.example.invalid    # prod has no Mailpit
-export CA_HTTP_PORT=8081 CA_HTTPS_PORT=8443
+# Pick FREE ports rather than hardcoding 8081/8443. The gate's claim is "the prod
+# profile deploys and serves HTTPS through Caddy", not "port 8443 specifically" -
+# and on a machine where something else already holds 8443 the suite failed with
+# "address already in use", which reads as a product defect and is not one. This
+# repo is public now; it must not assume one developer's free ports.
+freeport(){ python3 -c "import socket;s=socket.socket();s.bind(('0.0.0.0',0));print(s.getsockname()[1]);s.close()"; }
+export CA_HTTP_PORT=$(freeport) CA_HTTPS_PORT=$(freeport)
+echo "  prod ports for this run: http=$CA_HTTP_PORT https=$CA_HTTPS_PORT" 
 docker compose up -d >/dev/null 2>&1
 sleep 25
 if ./deploy.sh >/tmp/r_prod 2>&1; then
@@ -564,7 +587,7 @@ if ./deploy.sh >/tmp/r_prod 2>&1; then
   a=$(docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" db mariadb -udolibarr dolibarr -sN \
       -e "SELECT value FROM llx_const WHERE name='AGENDA_REMINDER_EMAIL';" 2>/dev/null | grep -v -i "insecure\|warning")
   [ "$a" = "1" ] && echo "  AGENDA_REMINDER_EMAIL=1 on PROD" || { echo "  FAIL: AGENDA_REMINDER_EMAIL='$a' on prod"; fail=1; }
-  code=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:8443/ --max-time 20)
+  code=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost:$CA_HTTPS_PORT/ --max-time 20)
   [ "$code" = "200" ] && echo "  https via Caddy: 200" || { echo "  FAIL: https returned $code"; fail=1; }
   d8=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ --max-time 5)
   [ "$d8" = "000" ] && echo "  :8080 unpublished (Caddy is the only ingress)" || { echo "  FAIL: 8080 reachable ($d8)"; fail=1; }

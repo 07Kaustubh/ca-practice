@@ -16,6 +16,9 @@ set -uo pipefail
 cd "$(dirname "$0")"
 . ./ca.env; set -a; . ./secrets.env; set +a
 
+# Some jobs need an argument. raise_fees.php is a DRY RUN without --commit, so a
+# fees job that forgot it would have billed nothing and reported success.
+args=""
 case "${1:-}" in
   digest)   src=morning_digest.php;      dst=md.php ;;
   docs)     src=doc_requests.php;        dst=dr.php ;;
@@ -27,7 +30,11 @@ case "${1:-}" in
   # DRY RUN by design. Destroying personal data is never something a cron job
   # does by default; this reports what is due and the CA acts on the screen.
   retention) src=retention.php;          dst=rt.php ;;
-  *) echo "usage: $(basename "$0") {digest|docs|filings|calendar|retention}" >&2; exit 2 ;;
+  # Raising the month's retainer invoices was behind a deploy-time env flag, so
+  # routine billing meant an SSH session. It is idempotent per period, so running
+  # it monthly cannot double-bill; he reviews them in Billing as usual.
+  fees)      src=raise_fees.php;         dst=rf.php; args="--commit" ;;
+  *) echo "usage: $(basename "$0") {digest|docs|filings|calendar|retention|fees}" >&2; exit 2 ;;
 esac
 
 docker compose cp "$src" "dolibarr:/tmp/$dst" >/dev/null \
@@ -38,7 +45,7 @@ docker compose cp "$src" "dolibarr:/tmp/$dst" >/dev/null \
 docker compose exec -T \
   -e CA_EMAIL -e CA_FIRM_NAME -e CA_SMTP_HOST -e CA_SMTP_PORT \
   -e CA_BASE_URL -e CA_GOLIVE -e CA_DOC_HORIZON -e CA_REMIND_DAYS \
-  dolibarr php "/tmp/$dst"
+  dolibarr php "/tmp/$dst" $args
 rc=$?
 
 # Same hygiene deploy.sh enforces: nothing of ours is left lying in the container.

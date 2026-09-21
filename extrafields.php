@@ -27,6 +27,10 @@ $want = array(
   // turnover. Without this the calendar either invents the obligation for
   // every small client or misses it for every large one.
   array('turnover_annual','Aggregate turnover (INR)','price',31,10,''),
+  // Reminder lead time PER CLIENT. It was one global CA_REMIND_DAYS for the whole
+  // register, so a client who needs a fortnight's notice and one who wants two
+  // days got the same nudge. Blank = use the practice default.
+  array('remind_days','Remind this client N days before','int',32,4,''),
   array('billing_cycle','Billing cycle','select',31,0,'Annual,Half-yearly,Quarterly,Monthly,Per filing'),
   // 194J applicability is a function of the PAYER's status and threshold, never
   // of a database row id. It must be recorded per client, not guessed.

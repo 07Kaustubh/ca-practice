@@ -355,8 +355,8 @@ Everything below is a screen. None of it needs a shell.
 
 | Screen | What it is for |
 |---|---|
-| `/custom/ca/client.php` | Add or edit a client. PAN/GSTIN/TAN are validated, and the statutory calendar is generated **on save** — a client added here is never invisible. |
-| `/custom/ca/filings.php` | Record that a return went out, with its acknowledgement number. `?view=ready` / `?view=filed` narrow the list. |
+| `/custom/ca/client.php` | Add or edit a client. PAN/GSTIN/TAN are validated and the statutory calendar is generated **on save** — a client added here is never invisible. Two fields decide real behaviour: **Aggregate turnover** decides whether GSTR-9 applies (exempt up to Rs 2 crore), and **Remind this client N days before** overrides the practice default for that one client. Each row links to their **Filings** and to the **Full record**, where Dolibarr handles deactivate and delete. |
+| `/custom/ca/filings.php` | **Where the day is spent.** Everything due in the next 30 days, with the documents still outstanding beside each row. **Got them** marks those documents received in one click, which is what stops the client being chased. **Record as filed** takes the acknowledgement number. **Add task** puts a one-off job in the same list, with the same reminder. `?socid=N` narrows to one client — that is the answer to *"did you file my GSTR?"*. |
 | `/custom/ca/rates.php` | Edit the late-fee rates when a statute changes. The `pattern` column is deliberately read-only — it is a regex the matching depends on. |
 | `/custom/ca/adjustments.php` | Record a gazetted holiday, or a government extension. An extension moves that due date for **every** client at once. |
 | `/custom/ca/privacy.php` | Retention policy, erasure requests, and the erasure log (DPDP §8(7)). |

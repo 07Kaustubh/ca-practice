@@ -19,7 +19,11 @@ Sign at the bottom only when every row passes or is explicitly waived in writing
 | B1 | Import the client CSV | `FAILED=0`; count matches their list | ☐ |
 | B2 | Import a row with PAN `NOTAPAN99` | rejected: `malformed PAN` | ☐ |
 | B3 | Import GSTIN that does not embed its PAN | rejected with that reason | ☐ |
-| B4 | Create a client in the UI, tick `Client`, fill GSTIN under "More..." | appears in the client list with GSTIN on the card | ☐ |
+| B4 | **Compliance → Client profiles**, add a client with GSTIN, PAN and a GST scheme | saves, and the message states how many statutory deadlines were generated **on that save** | ☐ |
+| B4a | Save a client with PAN `NOTAPAN99` | refused with `malformed PAN`; **no** client row is created | ☐ |
+| B4b | Save a GSTIN that does not embed the PAN | refused, naming both values | ☐ |
+| B4c | Leave **Aggregate turnover** blank | no GSTR-9 is generated, and the morning email lists it as a data-quality gap rather than guessing | ☐ |
+| B4d | Set **Remind this client** to 21, re-run `./ca_job.sh calendar` | that client's reminders sit 21 days before each deadline; every other client stays on the practice default | ☐ |
 | B5 | Re-run the import | `already-present=<n>`, no duplicates | ☐ |
 
 ## C. Compliance calendar
@@ -41,7 +45,19 @@ Sign at the bottom only when every row passes or is explicitly waived in writing
 | D4 | Tick opt-in, re-run chase | that client is now chased | ☐ |
 | D5 | Run the chase twice in one day | second run does not re-message | ☐ |
 | D6 | A client due in 2 days | tone is `urgent` | ☐ |
-| D7 | Mark all documents `received` | client disappears from the morning email; counts under READY TO FILE | ☐ |
+| D7 | On **Compliance → Ready to file**, press **Got them** on a row | its outstanding documents show `all in`, and the next chase run no longer asks that client for them | ☐ |
+
+## D2. The daily screen
+| # | Test | Expected | Pass |
+|---|---|---|---|
+| D8 | Open **Compliance → Ready to file** | everything due in the next 30 days, soonest first — **not** only the rows whose documents are already in | ☐ |
+| D9 | Paste an ITR acknowledgement against a GSTR row | refused, naming the shape a GST ARN actually takes | ☐ |
+| D10 | Record a filing dated tomorrow | refused: a return cannot have been filed in the future | ☐ |
+| D11 | **Add task** "collect Form 16", pick a client, set a date | appears in the same list, and an email reminder is scheduled for it like any statutory date | ☐ |
+| D12 | Press **Done** on that task | it leaves the list; no acknowledgement number is demanded | ☐ |
+| D13 | Press **Remove** on a task, then try **N/A** on a real GSTR row | the task is deleted; the GSTR row is **kept** and marked not-applicable with your reason | ☐ |
+| D14 | Try to remove a row already recorded as filed | refused — it stays on the record | ☐ |
+| D15 | Click a client's name in the list | their whole open position and full filing history, with every acknowledgement number | ☐ |
 
 ## E. Reminders
 | # | Test | Expected | Pass |

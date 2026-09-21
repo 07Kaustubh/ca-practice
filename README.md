@@ -40,7 +40,7 @@ Design decisions, security posture and every trap found the hard way:
 
 ## Verification
 
-`./regression.sh` wipes to empty volumes and runs 34 gates — deploy, CSV import
+`./regression.sh` wipes to empty volumes and runs 35 gates — deploy, CSV import
 with PAN/GSTIN validation, calendar generation, invoicing with 194J assertions,
 the filing lifecycle end to end (documents received → ready → filed with a valid
 acknowledgement, junk and back-dated acknowledgements refused), statutory dates
@@ -59,10 +59,12 @@ a gate that cannot fail is treated as a defect, not as a pass.
 acknowledgement number · his practice's invoicing, bank, expenses and books.
 
 **Run from the browser, no shell:** add or edit a client and the statutory
-calendar is generated on save (`/custom/ca/client.php`) · record a filing with
-its acknowledgement (`filings.php`) · edit the late-fee rates when a statute
-changes (`rates.php`) · record a gazetted holiday or a government extension,
-which moves that due date for every client at once (`adjustments.php`).
+calendar is generated on save (`/custom/ca/client.php`) · see everything due,
+tick off documents as they arrive, and record a filing with its acknowledgement
+(`filings.php`) · add a **one-off task** that is not a statutory return at all
+and have it remind you like one · edit the late-fee rates when a statute changes
+(`rates.php`) · record a gazetted holiday or a government extension, which moves
+that due date for every client at once (`adjustments.php`).
 The calendar also regenerates nightly, so nothing waits on a deploy.
 
 Server configuration — SMTP, WhatsApp credentials, backup keys — stays in

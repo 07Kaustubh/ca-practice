@@ -16,7 +16,7 @@ error envelope are reproduced field for field. Two fidelity notes that matter:
 Inject a failure with  CA_MOCK_FAIL=<code>  e.g. CA_MOCK_FAIL=131026
 Force a run of mixed outcomes with  CA_MOCK_FAIL=mixed
 """
-import json, os, http.server, random
+import json, os, http.server, random, socketserver
 
 # details strings verbatim from Meta's error tables
 ERRORS = {
@@ -109,4 +109,23 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.HTTPServer(('127.0.0.1', 9099), H).serve_forever()
+class Server(http.server.HTTPServer):
+    """HTTPServer without the reverse-DNS lookup.
+
+    http.server.HTTPServer.server_bind() calls socket.getfqdn() to fill in
+    server_name. On a machine whose reverse DNS is slow or unreachable that call
+    blocks for tens of seconds - and it happens AFTER bind() but BEFORE listen(),
+    so the port looks taken while nothing answers. The suite's readiness probe
+    then reports "mock Graph API did not start" and five WhatsApp gates fail, for
+    a name this process never uses.
+
+    A test double must not depend on the network it exists to replace.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = '127.0.0.1'
+        self.server_port = self.server_address[1]
+
+
+Server(('127.0.0.1', 9099), H).serve_forever()

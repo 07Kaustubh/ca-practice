@@ -69,6 +69,7 @@ $BILL_CYCLES  = array('Annual', 'Half-yearly', 'Quarterly', 'Monthly', 'Per fili
 $TEXTFIELDS = array('gstin', 'pan', 'tan', 'cin', 'whatsapp_number');
 $SELFIELDS  = array('entity_type', 'gst_scheme', 'billing_cycle');
 $BOOLFIELDS = array('tax_audit', 'roc_applicable', 'tds_applicable', 'whatsapp_optin');
+$NUMFIELDS  = array('fee_annual', 'turnover_annual', 'remind_days');
 $UPPERFIELDS = array('gstin', 'pan', 'tan', 'cin');
 
 // Column widths from llx_societe / llx_societe_extrafields. MariaDB runs strict
@@ -150,15 +151,26 @@ if ($action === 'save') {
     }
     foreach ($SELFIELDS as $f)  $in[$f] = trim(GETPOST($f, 'alphanohtml', 2));
     foreach ($BOOLFIELDS as $f) $in[$f] = GETPOSTINT($f, 2) ? 1 : 0;
-    $in['fee_annual'] = trim(GETPOST('fee_annual', 'alphanohtml', 2));
+    // Three numeric extrafields, all optional. turnover_annual was never collected
+    // by this form at all, so a client added here always had turnover 0 and was
+    // silently never given a GSTR-9 - the annual return is turnover-conditional.
+    foreach ($NUMFIELDS as $f) $in[$f] = trim(GETPOST($f, 'alphanohtml', 2));
 
     // The statutory identifiers, by the same rules the importer applies.
     $errors = ca_validate_profile($in['pan'], $in['gstin'], $in['tan']);
     if ($in['name'] === '') $errors[] = "A client needs a name.";
     // (float) '60,000' is 60 - a silent 99.9% discount on the retainer.
-    if ($in['fee_annual'] !== '' && !is_numeric($in['fee_annual'])) {
-        $errors[] = "Annual retainer '".dol_escape_htmltag($in['fee_annual'])
-                   ."' is not a number - enter digits only, without commas or 'Rs'.";
+    foreach (array('fee_annual' => 'Annual retainer', 'turnover_annual' => 'Aggregate turnover') as $f => $lbl) {
+        if ($in[$f] !== '' && !is_numeric($in[$f])) {
+            $errors[] = $lbl." '".dol_escape_htmltag($in[$f])
+                       ."' is not a number - enter digits only, without commas or 'Rs'.";
+        }
+    }
+    // A reminder lead time of 400 days is a typo, not a preference.
+    if ($in['remind_days'] !== ''
+        && (!ctype_digit($in['remind_days']) || (int) $in['remind_days'] > 90)) {
+        $errors[] = "Reminder days '".dol_escape_htmltag($in['remind_days'])
+                   ."' must be a whole number of days from 0 to 90, or blank for the practice default.";
     }
     // A select value that is not one of the known strings drives an empty
     // calendar rather than an error, so refuse it here instead.
@@ -202,12 +214,16 @@ if ($action === 'save') {
             $cols = array('fk_object');
             $vals = array((string) ((int) $socid));
             $sets = array();
-            foreach (array_merge($TEXTFIELDS, $SELFIELDS, $BOOLFIELDS, array('fee_annual')) as $f) {
+            foreach (array_merge($TEXTFIELDS, $SELFIELDS, $BOOLFIELDS, $NUMFIELDS) as $f) {
                 if (empty($have[$f])) continue;   // extrafield not installed here
                 if (in_array($f, $BOOLFIELDS, true)) {
                     $v = (string) ((int) $in[$f]);
-                } elseif ($f === 'fee_annual') {
-                    $v = ($in['fee_annual'] === '' ? 'NULL' : (string) ((float) $in['fee_annual']));
+                } elseif (in_array($f, $NUMFIELDS, true)) {
+                    // blank means "not stated", which is NOT the same as zero:
+                    // turnover 0 would wrongly exempt him from GSTR-9, and
+                    // remind_days 0 would mean "remind on the day itself".
+                    $v = ($in[$f] === '' ? 'NULL'
+                         : ($f === 'remind_days' ? (string) ((int) $in[$f]) : (string) ((float) $in[$f])));
                 } else {
                     $v = "'".$db->escape($in[$f])."'";
                 }
@@ -308,7 +324,8 @@ llxHeader('', 'Client profile');
 $self = $_SERVER["PHP_SELF"];
 
 // ── what the form should show ────────────────────────────────────────────────
-$cur = array('name' => '', 'email' => '', 'phone' => '', 'fee_annual' => '');
+$cur = array('name' => '', 'email' => '', 'phone' => '');
+foreach ($NUMFIELDS as $f) $cur[$f] = '';
 foreach (array_merge($TEXTFIELDS, $SELFIELDS) as $f) $cur[$f] = '';
 foreach ($BOOLFIELDS as $f) $cur[$f] = 0;
 
@@ -327,7 +344,10 @@ if ($prefill !== null) {
         $cur['phone'] = (string) $o->phone;
         foreach (array_merge($TEXTFIELDS, $SELFIELDS) as $f) $cur[$f] = isset($o->$f) ? (string) $o->$f : '';
         foreach ($BOOLFIELDS as $f) $cur[$f] = isset($o->$f) ? (int) $o->$f : 0;
-        $cur['fee_annual'] = isset($o->fee_annual) ? (string) ((float) $o->fee_annual) : '';
+        foreach ($NUMFIELDS as $f) {
+            $cur[$f] = (isset($o->$f) && $o->$f !== null && $o->$f !== '')
+                     ? ($f === 'remind_days' ? (string) ((int) $o->$f) : (string) ((float) $o->$f)) : '';
+        }
     } else {
         setEventMessages("Client ".((int) $socid)." does not exist.", null, 'errors');
         $socid = 0;
@@ -384,10 +404,23 @@ print '<tr><td>WhatsApp number</td><td>'
      .'<input type="text" name="whatsapp_number" aria-label="WhatsApp number" size="24" maxlength="20" value="'.dol_escape_htmltag($cur['whatsapp_number']).'"></td></tr>';
 print '<tr><td>WhatsApp opt-in</td><td>'.ca_cs_bool('whatsapp_optin', $cur['whatsapp_optin'], 'WhatsApp opt-in')
      .' <span class="opacitymedium">no message is sent without this</span></td></tr>';
+// Reminder timing per client. It used to be one global CA_REMIND_DAYS for the
+// whole register, so the client who needs a fortnight's notice and the one who
+// wants two days got the same nudge - and it stopped meaning anything to both.
+print '<tr><td>Remind this client</td><td>'
+     .'<input type="text" name="remind_days" aria-label="Days before the deadline to remind this client" size="4" value="'.dol_escape_htmltag($cur['remind_days']).'">'
+     .' <span class="opacitymedium">days before each deadline &mdash; blank uses the practice default of '
+     .((int) (getenv('CA_REMIND_DAYS') ?: 7)).'</span></td></tr>';
 print '<tr><td>Annual retainer (INR)</td><td>'
      .'<input type="text" name="fee_annual" aria-label="Annual retainer in rupees" size="14" value="'.dol_escape_htmltag($cur['fee_annual']).'">'
      .' <span class="opacitymedium">digits only</span></td></tr>';
 print '<tr><td>Billing cycle</td><td>'.ca_cs_select('billing_cycle', $BILL_CYCLES, $cur['billing_cycle'], 'Billing cycle').'</td></tr>';
+// GSTR-9 is exempt up to Rs 2 crore and the exemption is re-notified every year,
+// so this decides whether the annual return is generated at all. Left blank the
+// calendar cannot know, and says so in the morning email rather than guessing.
+print '<tr><td>Aggregate turnover (INR)</td><td>'
+     .'<input type="text" name="turnover_annual" aria-label="Aggregate turnover in rupees" size="16" value="'.dol_escape_htmltag($cur['turnover_annual']).'">'
+     .' <span class="opacitymedium">decides GSTR-9 &mdash; exempt up to Rs 2 crore</span></td></tr>';
 
 print '</table></div>';
 if ($permtowrite) {
@@ -424,7 +457,7 @@ if ($blind > 0) {
 print '<div class="div-table-responsive">';
 print '<table id="ca-clients" class="tagtable liste">';
 print '<tr class="liste_titre">';
-print '<th class="right">Id</th><th>Client</th><th>PAN</th><th>GST scheme</th><th class="right">Deadlines</th>';
+print '<th class="right">Id</th><th>Client</th><th>PAN</th><th>GST scheme</th><th class="right">Deadlines</th><th></th>';
 print '</tr>';
 foreach ($rowsout as $o) {
     $cnt = (int) $o->deadlines;
@@ -437,9 +470,17 @@ foreach ($rowsout as $o) {
     // is the silent failure this screen exists to catch.
     if ($cnt === 0) print '<td class="right"><span class="error">0 - NO CALENDAR</span></td>';
     else print '<td class="right">'.$cnt.'</td>';
+    // The D of CRUD. Deliberately NOT reimplemented here: Dolibarr's own client
+    // card already does delete and deactivate, with its own confirmation and its
+    // own referential checks, and a second delete path is a second way to lose a
+    // client's history. This is the missing signpost, not a new button.
+    print '<td class="nowrap">'
+         .'<a class="butAction" href="'.DOL_URL_ROOT.'/custom/ca/filings.php?view=all&socid='.((int) $o->rowid).'">Filings</a>'
+         .'<a class="butAction" href="'.DOL_URL_ROOT.'/societe/card.php?socid='.((int) $o->rowid).'" title="Full record, including deactivate and delete">Full record</a>'
+         .'</td>';
     print '</tr>';
 }
-if (!$rowsout) print '<tr class="oddeven"><td colspan="5">No clients yet.</td></tr>';
+if (!$rowsout) print '<tr class="oddeven"><td colspan="6">No clients yet.</td></tr>';
 print '</table></div>';
 
 llxFooter();

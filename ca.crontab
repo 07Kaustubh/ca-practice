@@ -27,3 +27,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # expired so they surface on the privacy screen. Reports only - erasure itself
 # is a deliberate act, taken by a person, on the screen.
 20 5 * * 1   cd /opt/ca && ./ca_job.sh retention >> /var/log/ca-retention.log 2>&1
+# The month's retainer invoices. Idempotent per period - a second run in the same
+# month raises nothing - so this cannot double-bill. Review them under Billing.
+40 6 1 * *   cd /opt/ca && ./ca_job.sh fees >> /var/log/ca-fees.log 2>&1

@@ -239,6 +239,12 @@ function ca_cal_flush() { /* caches are per-process; nothing to do in CLI/web on
 function ca_generate_for_client($db, $user, $c, $fy, $remindDays = 7)
 {
     $made = 0; $skip = 0; $rem = 0; $stalecnt = 0; $shifted = 0; $extended = 0; $moved = 0;
+    // A per-client lead time beats the practice default. One global number meant
+    // the client who needs a fortnight and the one who wants two days got the same
+    // nudge, so the nudge stopped meaning anything to both of them.
+    if (isset($c['remind_days']) && $c['remind_days'] !== null && (int) $c['remind_days'] > 0) {
+        $remindDays = (int) $c['remind_days'];
+    }
     $want = array();
 
     foreach (ca_rules_for($c, $fy) as $r) {
@@ -315,7 +321,7 @@ function ca_client_rows($db, $socid = 0)
 {
     $sql = "SELECT s.rowid,s.nom,
        COALESCE(e.gst_scheme,'') gst_scheme, COALESCE(e.tan,'') tan, COALESCE(e.gstin,'') gstin,
-       COALESCE(e.turnover_annual,0) turnover_annual,
+       COALESCE(e.turnover_annual,0) turnover_annual, e.remind_days,
        COALESCE(e.entity_type,'') entity_type, COALESCE(e.tax_audit,0) tax_audit,
        COALESCE(e.roc_applicable,0) roc_applicable
        FROM ".MAIN_DB_PREFIX."societe s
